@@ -412,8 +412,34 @@ func UpdateUserHiddenComments(ctx *context.Context) {
 		ctx.ServerError("SetUserSetting", err)
 		return
 	}
+	// saving the hidden comment types applies them on issue pages, instead of the filter picked there
+	if err := user_model.DeleteUserSetting(ctx, ctx.Doer.ID, user_model.SettingsKeyIssueTimelineFilter); err != nil {
+		ctx.ServerError("DeleteUserSetting", err)
+		return
+	}
 
 	log.Trace("User settings updated: %s", ctx.Doer.Name)
 	ctx.Flash.Success(ctx.Tr("settings.saved_successfully"))
 	ctx.Redirect(setting.AppSubURL + "/user/settings/appearance")
+}
+
+// UpdateUserTimelineFilter sets the activity shown on issue pages: all of it, only the comments, or the hidden comment types ("custom").
+// It never changes the hidden comment types, so switching back to "custom" restores them.
+func UpdateUserTimelineFilter(ctx *context.Context) {
+	switch filter := ctx.FormString("filter"); filter {
+	case user_model.SettingIssueTimelineFilterAll, user_model.SettingIssueTimelineFilterComments:
+		if err := user_model.SetUserSetting(ctx, ctx.Doer.ID, user_model.SettingsKeyIssueTimelineFilter, filter); err != nil {
+			ctx.ServerError("SetUserSetting", err)
+			return
+		}
+	case "custom":
+		if err := user_model.DeleteUserSetting(ctx, ctx.Doer.ID, user_model.SettingsKeyIssueTimelineFilter); err != nil {
+			ctx.ServerError("DeleteUserSetting", err)
+			return
+		}
+	default:
+		ctx.HTTPError(http.StatusBadRequest)
+		return
+	}
+	ctx.JSONOK()
 }

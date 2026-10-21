@@ -852,6 +852,7 @@ func prepareIssueViewCommentsAndSidebarParticipants(ctx *context.Context, issue 
 	combineLabelComments(issue)
 
 	var hiddenCommentTypes *big.Int
+	var timelineFilter string
 	if ctx.IsSigned {
 		val, err := user_model.GetUserSetting(ctx, ctx.Doer.ID, user_model.SettingsKeyHiddenCommentTypes)
 		if err != nil {
@@ -859,10 +860,35 @@ func prepareIssueViewCommentsAndSidebarParticipants(ctx *context.Context, issue 
 			return
 		}
 		hiddenCommentTypes, _ = new(big.Int).SetString(val, 10) // we can safely ignore the failed conversion here
+		if timelineFilter, err = user_model.GetUserSetting(ctx, ctx.Doer.ID, user_model.SettingsKeyIssueTimelineFilter); err != nil {
+			ctx.ServerError("GetUserSetting", err)
+			return
+		}
 	}
-	ctx.Data["ShouldShowCommentType"] = func(commentType issues_model.CommentType) bool {
-		return hiddenCommentTypes == nil || hiddenCommentTypes.Bit(int(commentType)) == 0
+	hasHiddenCommentTypes := hiddenCommentTypes != nil && hiddenCommentTypes.Sign() != 0
+	if timelineFilter != user_model.SettingIssueTimelineFilterAll && timelineFilter != user_model.SettingIssueTimelineFilterComments {
+		timelineFilter = util.Iif(hasHiddenCommentTypes, "custom", user_model.SettingIssueTimelineFilterAll)
 	}
+	shouldShowCommentType := func(commentType issues_model.CommentType) bool {
+		switch timelineFilter {
+		case user_model.SettingIssueTimelineFilterAll:
+			return true
+		case user_model.SettingIssueTimelineFilterComments:
+			return commentType.HasContentSupport()
+		}
+		return hiddenCommentTypes.Bit(int(commentType)) == 0
+	}
+	ctx.Data["ShouldShowCommentType"] = shouldShowCommentType
+	ctx.Data["TimelineFilter"] = timelineFilter
+	ctx.Data["HasHiddenCommentTypes"] = hasHiddenCommentTypes
+
+	hiddenTimelineEventCount := 0
+	for _, comment := range issue.Comments {
+		if !shouldShowCommentType(comment.Type) {
+			hiddenTimelineEventCount++
+		}
+	}
+	ctx.Data["HiddenTimelineEventCount"] = hiddenTimelineEventCount
 
 	// prepare for sidebar participants
 	ctx.Data["Participants"] = participants

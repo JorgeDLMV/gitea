@@ -1,0 +1,29 @@
+<div class="timeline-item event issue-timeline-filter">
+	<span class="badge">{{svg "octicon-filter"}}</span>
+	<span class="comment-text-line flex-text-block">
+		<span class="ui dropdown jump flex-text-inline">
+			<span class="text tw-text-text tw-font-semibold">
+				{{if eq .TimelineFilter "comments"}}
+					{{ctx.Locale.Tr "repo.issues.timeline_filter.comments"}}
+				{{else if eq .TimelineFilter "custom"}}
+					{{ctx.Locale.Tr "repo.issues.timeline_filter.custom"}}
+				{{else}}
+					{{ctx.Locale.Tr "repo.issues.timeline_filter.all"}}
+				{{end}}
+			</span>
+			{{svg "octicon-triangle-down" 14 "dropdown icon"}}
+			<div class="menu">
+				<a class="{{if eq .TimelineFilter "all"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=all">{{ctx.Locale.Tr "repo.issues.timeline_filter.all"}}</a>
+				<a class="{{if eq .TimelineFilter "comments"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=comments">{{ctx.Locale.Tr "repo.issues.timeline_filter.comments"}}</a>
+				{{if .HasHiddenCommentTypes}}
+					<a class="{{if eq .TimelineFilter "custom"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=custom">{{ctx.Locale.Tr "repo.issues.timeline_filter.custom"}}</a>
+				{{end}}
+				<div class="divider"></div>
+				<a class="item" href="{{AppSubUrl}}/user/settings/appearance#hidden-comment-types">{{ctx.Locale.Tr "repo.issues.timeline_filter.customize"}}</a>
+			</div>
+		</span>
+		{{if .HiddenTimelineEventCount}}
+			<span>{{ctx.Locale.TrN .HiddenTimelineEventCount "repo.issues.timeline_filter.hidden_events_1" "repo.issues.timeline_filter.hidden_events" .HiddenTimelineEventCount}}</span>
+		{{end}}
+	</span>
+</div>

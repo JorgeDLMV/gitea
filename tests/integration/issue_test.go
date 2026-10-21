@@ -796,3 +796,57 @@ func TestIssueReferenceURL(t *testing.T) {
 	ref, _ = htmlDoc.Find(`.timeline-item.comment:not(.issue-content-comment) .reference-issue`).Attr("data-reference")
 	assert.Equal(t, setting.AppURL+"user2/repo1/issues/1#issuecomment-2", ref)
 }
+
+func TestIssueTimelineFilter(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	const issueLink = "/user2/repo1/issues/1"
+	session := loginUser(t, "user2")
+
+	timeline := func(t *testing.T, session *TestSession) (filter, hiddenText string, events int) {
+		htmlDoc := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", issueLink), http.StatusOK).Body)
+		filterItem := htmlDoc.Find(".issue-timeline-filter")
+		return strings.TrimSpace(filterItem.Find(".ui.dropdown > .text").Text()),
+			strings.TrimSpace(filterItem.Find(".comment-text-line > span:not(.ui)").Text()),
+			htmlDoc.Find(".comment-list .timeline-item.event:not(.issue-timeline-filter)").Length()
+	}
+	setFilter := func(t *testing.T, filter string, expectedStatus int) {
+		session.MakeRequest(t, NewRequest(t, "POST", "/user/settings/appearance/timeline_filter?filter="+filter), expectedStatus)
+	}
+
+	filter, hiddenText, allEvents := timeline(t, session)
+	assert.Equal(t, "All activity", filter)
+	assert.Empty(t, hiddenText)
+	require.Positive(t, allEvents)
+
+	setFilter(t, "comments", http.StatusOK)
+	filter, hiddenText, events := timeline(t, session)
+	assert.Equal(t, "Comments only", filter)
+	assert.Contains(t, hiddenText, "hidden")
+	assert.Zero(t, events)
+
+	// saving the hidden comment types in the settings switches to them, and the quick filters never overwrite them
+	session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user/settings/appearance/hidden_comments", map[string]string{"label": "on"}), http.StatusSeeOther)
+	hiddenCommentTypes, err := user_model.GetUserSetting(t.Context(), 2, user_model.SettingsKeyHiddenCommentTypes)
+	require.NoError(t, err)
+	filter, _, customEvents := timeline(t, session)
+	assert.Equal(t, "Custom activity", filter)
+	assert.Less(t, customEvents, allEvents)
+
+	setFilter(t, "all", http.StatusOK)
+	filter, _, events = timeline(t, session)
+	assert.Equal(t, "All activity", filter)
+	assert.Equal(t, allEvents, events)
+
+	setFilter(t, "custom", http.StatusOK)
+	filter, _, events = timeline(t, session)
+	assert.Equal(t, "Custom activity", filter)
+	assert.Equal(t, customEvents, events)
+	unchanged, err := user_model.GetUserSetting(t.Context(), 2, user_model.SettingsKeyHiddenCommentTypes)
+	require.NoError(t, err)
+	assert.Equal(t, hiddenCommentTypes, unchanged)
+
+	setFilter(t, "unknown", http.StatusBadRequest)
+
+	resp := MakeRequest(t, NewRequest(t, "GET", issueLink), http.StatusOK)
+	assert.Zero(t, NewHTMLParser(t, resp.Body).Find(".issue-timeline-filter").Length(), "the filter is a user setting, anonymous users don't get it")
+}

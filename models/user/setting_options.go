@@ -6,6 +6,10 @@ package user
 const (
 	// SettingsKeyHiddenCommentTypes is the setting key for hidden comment types
 	SettingsKeyHiddenCommentTypes = "issue.hidden_comment_types"
+	// SettingsKeyIssueTimelineFilter is the setting key for the activity shown on issue pages, unset to use the hidden comment types
+	SettingsKeyIssueTimelineFilter     = "issue.timeline_filter"
+	SettingIssueTimelineFilterAll      = "all"
+	SettingIssueTimelineFilterComments = "comments"
 	// SettingsKeyDiffWhitespaceBehavior is the setting key for whitespace behavior of diff
 	SettingsKeyDiffWhitespaceBehavior = "diff.whitespace_behaviour"
 	// SettingsKeyShowOutdatedComments is the setting key whether or not to show outdated comments in PRs

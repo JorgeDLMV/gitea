@@ -604,6 +604,10 @@
   align-items: center;
 }
 
+.repository.view.issue .comment-list .issue-timeline-filter .menu {
+  min-width: 200px;
+}
+
 .repository.view.issue .comment-list .event > .detail {
   margin-left: 15px;
   width: 100%;

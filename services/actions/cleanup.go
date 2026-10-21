@@ -6,8 +6,6 @@ package actions
 import (
 	"context"
 	"fmt"
-	"maps"
-	"slices"
 	"time"
 
 	actions_model "gitea.dev/models/actions"
@@ -395,31 +393,35 @@ func iterateCommitStatusesLinkingDeletedRuns(ctx context.Context, fn func([]*git
 		if err != nil {
 			return err
 		}
-		runIDsByStatus := make(map[*git_model.CommitStatus]int64)
-		jobIDsByStatus := make(map[*git_model.CommitStatus]int64)
+		type actionsLink struct {
+			status       *git_model.CommitStatus
+			runID, jobID int64
+		}
+		links := make([]actionsLink, 0, len(statuses))
 		for _, status := range statuses {
-			if status.Repo = repos[status.RepoID]; status.Repo == nil {
+			status.Repo = repos[status.RepoID]
+			if status.Repo == nil {
 				continue // statuses of deleted repositories are not ours to fix
 			}
 			if runID, jobID, ok := status.ParseGiteaActionsTargetURL(ctx); ok {
-				runIDsByStatus[status] = runID
-				jobIDsByStatus[status] = jobID
+				links = append(links, actionsLink{status: status, runID: runID, jobID: jobID})
 			}
 		}
-		if len(jobIDsByStatus) == 0 {
+		if len(links) == 0 {
 			continue
 		}
 
-		jobs := make(map[int64]*actions_model.ActionRunJob, len(jobIDsByStatus))
-		if err := db.GetEngine(ctx).In("id", slices.Collect(maps.Values(jobIDsByStatus))).Cols("id", "repo_id", "run_id").Find(&jobs); err != nil {
+		jobIDs := container.FilterSlice(links, func(l actionsLink) (int64, bool) { return l.jobID, true })
+		jobs := make(map[int64]*actions_model.ActionRunJob, len(jobIDs))
+		if err := db.GetEngine(ctx).In("id", jobIDs).Cols("id", "repo_id", "run_id").Find(&jobs); err != nil {
 			return err
 		}
 		var linkingDeleted []*git_model.CommitStatus
-		for status, jobID := range jobIDsByStatus {
-			job := jobs[jobID]
+		for _, link := range links {
+			job := jobs[link.jobID]
 			// a job of another run or repository is not what the link shows either: the page is a 404
-			if job == nil || job.RepoID != status.RepoID || job.RunID != runIDsByStatus[status] {
-				linkingDeleted = append(linkingDeleted, status)
+			if job == nil || job.RepoID != link.status.RepoID || job.RunID != link.runID {
+				linkingDeleted = append(linkingDeleted, link.status)
 			}
 		}
 		if len(linkingDeleted) > 0 {

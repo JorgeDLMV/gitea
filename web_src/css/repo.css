@@ -608,6 +608,10 @@
   min-width: 200px;
 }
 
+.repository.view.issue .comment-list .issue-timeline-comments {
+  padding: 8px 0;
+}
+
 .repository.view.issue .comment-list .event > .detail {
   margin-left: 15px;
   width: 100%;

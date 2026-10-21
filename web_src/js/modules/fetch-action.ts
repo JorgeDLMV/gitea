@@ -23,6 +23,9 @@ type FetchActionOpts = {
   // e.g.: "$this", "$innerHTML", "$closest(tr) td .the-class", "$body #the-id"
   successSync?: string;
 
+  // the selector of the elements to reload from the current page when the response is JSON, instead of reloading the whole page
+  successReload?: string;
+
   // the loading indicator element selector, it uses the same syntax as "data-fetch-sync" to find the element(s)
   // empty means no loading indicator, "$this" means the element itself
   loadingIndicator?: string;
@@ -83,7 +86,9 @@ async function handleFetchActionSuccess(el: HTMLElement, opt: FetchActionOpts, r
   const isRespJson = resp.headers.get('content-type')?.includes('application/json');
   const respText = await resp.text();
   const respJson = isRespJson ? JSON.parse(respText) : null;
-  if (isRespJson) {
+  if (isRespJson && opt.successReload && !respJson?.redirect) {
+    await fetchActionReloadElements(Array.from(document.querySelectorAll<HTMLElement>(opt.successReload)));
+  } else if (isRespJson) {
     handleFetchActionSuccessJson(el, respJson);
   } else if (opt.successSync) {
     await handleFetchActionSuccessSync(el, opt.successSync, respText);
@@ -264,6 +269,7 @@ async function performLinkFetchAction(el: HTMLElement) {
     url: el.getAttribute('data-url')!,
     loadingIndicator: el.getAttribute('data-fetch-indicator') ?? '$this', // by default, the link-action itself is the loading indicator
     successSync: el.getAttribute('data-fetch-sync') ?? '', // by default, no fetch sync for link-action
+    successReload: el.getAttribute('data-fetch-reload') ?? '', // by default, the whole page is reloaded after a JSON response
   });
 }
 
@@ -336,10 +342,12 @@ async function handleFetchActionSuccessSync(el: Element, successSync: string, re
 }
 
 async function fetchActionReloadOutdatedElements() {
-  const outdatedElems: HTMLElement[] = [];
-  for (const outdated of document.querySelectorAll<HTMLElement>('[data-fetch-trigger~="fetch-reload"]')) {
-    if (!outdated.id) throw new Error(`Elements with "fetch-reload" trigger must have an id to be reloaded after fetch sync: ${outdated.outerHTML.substring(0, 100)}`);
-    outdatedElems.push(outdated);
+  await fetchActionReloadElements(Array.from(document.querySelectorAll<HTMLElement>('[data-fetch-trigger~="fetch-reload"]')));
+}
+
+async function fetchActionReloadElements(outdatedElems: HTMLElement[]) {
+  for (const outdated of outdatedElems) {
+    if (!outdated.id) throw new Error(`Elements to reload after a fetch action must have an id: ${outdated.outerHTML.substring(0, 100)}`);
   }
   if (!outdatedElems.length) return;
 
@@ -425,6 +433,9 @@ export function initGlobalFetchAction() {
   //   * "$morph": use morph algorithm to update the target element
   //   * "$body #the-id .the-class": query the selector one by one from body
   //   * "$closest(tr) td": pseudo command can help to find the target element in a more flexible way
+  //
+  // * data-fetch-reload: when the response is JSON without "redirect", only the elements matching this selector
+  //   are reloaded from the current page (they must have an id), instead of reloading the whole page. Only for "link-action" elements.
   //
   // * data-modal-confirm: a "confirm modal dialog" will be shown before taking action.
   //   * it can be a string for the content of the modal dialog

@@ -1,4 +1,4 @@
-<div class="timeline-item event issue-timeline-filter">
+<div class="timeline-item event issue-timeline-filter" id="issue-timeline-filter">
 	<span class="badge">{{svg "octicon-filter"}}</span>
 	<span class="comment-text-line flex-text-block">
 		<span class="ui dropdown jump flex-text-inline">
@@ -13,10 +13,11 @@
 			</span>
 			{{svg "octicon-triangle-down" 14 "dropdown icon"}}
 			<div class="menu">
-				<a class="{{if eq .TimelineFilter "all"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=all">{{ctx.Locale.Tr "repo.issues.timeline_filter.all"}}</a>
-				<a class="{{if eq .TimelineFilter "comments"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=comments">{{ctx.Locale.Tr "repo.issues.timeline_filter.comments"}}</a>
+				{{$reload := "#issue-timeline-filter, #issue-timeline-comments"}}
+				<a class="{{if eq .TimelineFilter "all"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=all" data-fetch-reload="{{$reload}}" data-fetch-indicator="$body #issue-timeline-comments">{{ctx.Locale.Tr "repo.issues.timeline_filter.all"}}</a>
+				<a class="{{if eq .TimelineFilter "comments"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=comments" data-fetch-reload="{{$reload}}" data-fetch-indicator="$body #issue-timeline-comments">{{ctx.Locale.Tr "repo.issues.timeline_filter.comments"}}</a>
 				{{if .HasHiddenCommentTypes}}
-					<a class="{{if eq .TimelineFilter "custom"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=custom">{{ctx.Locale.Tr "repo.issues.timeline_filter.custom"}}</a>
+					<a class="{{if eq .TimelineFilter "custom"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=custom" data-fetch-reload="{{$reload}}" data-fetch-indicator="$body #issue-timeline-comments">{{ctx.Locale.Tr "repo.issues.timeline_filter.custom"}}</a>
 				{{end}}
 				<div class="divider"></div>
 				<a class="item" href="{{AppSubUrl}}/user/settings/appearance#hidden-comment-types">{{ctx.Locale.Tr "repo.issues.timeline_filter.customize"}}</a>

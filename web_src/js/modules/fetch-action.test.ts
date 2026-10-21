@@ -1,6 +1,9 @@
-import {execPseudoSelectorCommands, handleFetchActionErrorFields, handleFetchActionSuccessJson} from './fetch-action.ts';
+import {execPseudoSelectorCommands, handleFetchActionErrorFields, handleFetchActionSuccessJson, performFetchAction} from './fetch-action.ts';
+import {GET, request} from './fetch.ts';
 import {createElementFromHTML} from '../utils/dom.ts';
 import {captureNavigations, normalizeTestHtml} from '../utils/testhelper.ts';
+
+vi.mock('./fetch.ts', () => ({GET: vi.fn(), request: vi.fn()}));
 
 test('execPseudoSelectorCommands', () => {
   window.document.body.innerHTML = `
@@ -46,6 +49,16 @@ test('handleFetchActionSuccessJson', () => {
   handleFetchActionSuccessJson(document.body, {redirect: ''});
   handleFetchActionSuccessJson(document.body, {});
   expect(navigations.map((n) => n.type)).toEqual(['push', 'reload', 'reload']);
+});
+
+test('performFetchAction successReload', async () => {
+  window.document.body.innerHTML = `<div id="a">old a</div><div id="b">old b</div><div id="c">old c</div>`;
+  vi.mocked(request).mockResolvedValue(new Response('{}', {headers: {'Content-Type': 'application/json'}}));
+  vi.mocked(GET).mockResolvedValue(new Response(`<div id="a">new a</div><div id="b">new b</div><div id="c">new c</div>`));
+  const navigations = captureNavigations();
+  await performFetchAction(document.body, {method: 'POST', url: '/action', successReload: '#a, #b'});
+  expect(navigations).toEqual([]);
+  expect(document.body.innerHTML).toEqual(`<div id="a">new a</div><div id="b">new b</div><div id="c">old c</div>`);
 });
 
 test('handleFetchActionErrorFields', () => {

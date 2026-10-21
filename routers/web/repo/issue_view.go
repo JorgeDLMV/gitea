@@ -867,7 +867,7 @@ func prepareIssueViewCommentsAndSidebarParticipants(ctx *context.Context, issue 
 	}
 	hasHiddenCommentTypes := hiddenCommentTypes != nil && hiddenCommentTypes.Sign() != 0
 	if timelineFilter != user_model.SettingIssueTimelineFilterAll && timelineFilter != user_model.SettingIssueTimelineFilterComments {
-		timelineFilter = util.Iif(hasHiddenCommentTypes, "custom", user_model.SettingIssueTimelineFilterAll)
+		timelineFilter = util.Iif(hasHiddenCommentTypes, user_model.SettingIssueTimelineFilterCustom, user_model.SettingIssueTimelineFilterAll)
 	}
 	shouldShowCommentType := func(commentType issues_model.CommentType) bool {
 		switch timelineFilter {

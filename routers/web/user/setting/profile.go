@@ -423,8 +423,8 @@ func UpdateUserHiddenComments(ctx *context.Context) {
 	ctx.Redirect(setting.AppSubURL + "/user/settings/appearance")
 }
 
-// UpdateUserTimelineFilter sets the activity shown on issue pages: all of it, only the comments, or the hidden comment types ("custom").
-// It never changes the hidden comment types, so switching back to "custom" restores them.
+// UpdateUserTimelineFilter sets the activity shown on issue pages: all of it, only the comments, or the hidden comment types.
+// It never changes the hidden comment types, so switching back to them restores the same selection.
 func UpdateUserTimelineFilter(ctx *context.Context) {
 	switch filter := ctx.FormString("filter"); filter {
 	case user_model.SettingIssueTimelineFilterAll, user_model.SettingIssueTimelineFilterComments:
@@ -432,7 +432,7 @@ func UpdateUserTimelineFilter(ctx *context.Context) {
 			ctx.ServerError("SetUserSetting", err)
 			return
 		}
-	case "custom":
+	case user_model.SettingIssueTimelineFilterCustom:
 		if err := user_model.DeleteUserSetting(ctx, ctx.Doer.ID, user_model.SettingsKeyIssueTimelineFilter); err != nil {
 			ctx.ServerError("DeleteUserSetting", err)
 			return

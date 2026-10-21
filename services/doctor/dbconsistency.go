@@ -15,6 +15,7 @@ import (
 	secret_model "gitea.dev/models/secret"
 	"gitea.dev/modules/log"
 	"gitea.dev/modules/setting"
+	actions_service "gitea.dev/services/actions"
 	issue_service "gitea.dev/services/issue"
 )
 
@@ -137,6 +138,12 @@ func prepareDBConsistencyChecks() []consistencyCheck {
 			Counter:      actions_model.CountRunnersWithoutBelongingRepo,
 			Fixer:        actions_model.FixRunnersWithoutBelongingRepo,
 			FixedMessage: "Removed",
+		},
+		{
+			Name:         "Commit statuses linking to deleted Actions runs",
+			Counter:      actions_service.CountCommitStatusesLinkingDeletedRuns,
+			Fixer:        actions_service.FixCommitStatusesLinkingDeletedRuns,
+			FixedMessage: "Cleared the links of",
 		},
 		{
 			Name:         "Topics with empty repository count",

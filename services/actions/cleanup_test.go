@@ -11,8 +11,10 @@ import (
 
 	actions_model "gitea.dev/models/actions"
 	"gitea.dev/models/db"
+	git_model "gitea.dev/models/git"
 	repo_model "gitea.dev/models/repo"
 	"gitea.dev/models/unittest"
+	"gitea.dev/modules/commitstatus"
 	"gitea.dev/modules/container"
 	"gitea.dev/modules/optional"
 	"gitea.dev/modules/setting"
@@ -147,4 +149,72 @@ func TestCleanupRetentionZeroKeepsForever(t *testing.T) {
 		assert.NotContains(t, ids, art.ID)
 		assert.Contains(t, ids, past.ID)
 	})
+}
+
+func TestCommitStatusesLinkingDeletedRuns(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&commitStatusCheckBatchSize, 2)() // also test the batch
+
+	repo2 := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 2})
+	repo4 := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 4})
+	const sha = "c2d72f548424103f01ee1dc02889c1e2bff816b0"
+	runs := repo4.Link() + "/actions/runs/"
+
+	cases := []struct {
+		name      string
+		repoID    int64
+		targetURL string
+		state     commitstatus.CommitStatusState
+		cleared   bool
+	}{
+		{name: "existing job", repoID: repo4.ID, targetURL: runs + "791/jobs/192", state: commitstatus.CommitStatusSuccess},
+		{name: "deleted run", repoID: repo4.ID, targetURL: runs + "999991/jobs/999992", state: commitstatus.CommitStatusFailure, cleared: true},
+		{name: "job of another run", repoID: repo4.ID, targetURL: runs + "792/jobs/192", state: commitstatus.CommitStatusSuccess, cleared: true},
+		{name: "job of another repository", repoID: repo4.ID, targetURL: runs + "795/jobs/198", state: commitstatus.CommitStatusSuccess, cleared: true},
+		{name: "run link without job", repoID: repo4.ID, targetURL: runs + "999991", state: commitstatus.CommitStatusSuccess},
+		{name: "malformed run ID", repoID: repo4.ID, targetURL: runs + "abc/jobs/999992", state: commitstatus.CommitStatusSuccess},
+		{name: "external CI", repoID: repo4.ID, targetURL: "https://ci.example.com/o/r/actions/runs/1/jobs/2", state: commitstatus.CommitStatusSuccess},
+		{name: "actions link of another repository", repoID: repo4.ID, targetURL: repo2.Link() + "/actions/runs/999991/jobs/999992", state: commitstatus.CommitStatusSuccess},
+		{name: "no link", repoID: repo4.ID, state: commitstatus.CommitStatusSuccess},
+		{name: "deleted repository", repoID: 999999, targetURL: "/ghost/gone/actions/runs/999991/jobs/999992", state: commitstatus.CommitStatusSuccess},
+	}
+	statuses := make([]*git_model.CommitStatus, 0, len(cases))
+	for i, c := range cases {
+		status := &git_model.CommitStatus{
+			RepoID: c.repoID, SHA: sha, Index: int64(1000 + i), State: c.state, TargetURL: c.targetURL,
+			Context: c.name, ContextHash: git_model.HashCommitStatusContext(c.name),
+		}
+		require.NoError(t, db.Insert(t.Context(), status))
+		statuses = append(statuses, status)
+	}
+
+	count, err := CountCommitStatusesLinkingDeletedRuns(t.Context())
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, count)
+	for i, c := range cases {
+		assert.Equal(t, c.targetURL, unittest.AssertExistsAndLoadBean(t, &git_model.CommitStatus{ID: statuses[i].ID}).TargetURL, "counting changed %q", c.name)
+	}
+
+	fixed, err := FixCommitStatusesLinkingDeletedRuns(t.Context())
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, fixed)
+	for i, c := range cases {
+		status := unittest.AssertExistsAndLoadBean(t, &git_model.CommitStatus{ID: statuses[i].ID})
+		assert.Equal(t, c.state, status.State, c.name)
+		if c.cleared {
+			assert.Empty(t, status.TargetURL, c.name)
+		} else {
+			assert.Equal(t, c.targetURL, status.TargetURL, c.name)
+		}
+	}
+	summary := unittest.AssertExistsAndLoadBean(t, &git_model.CommitStatusSummary{RepoID: repo4.ID, SHA: sha})
+	for _, c := range cases {
+		if c.cleared {
+			assert.NotEqual(t, c.targetURL, summary.TargetURL, c.name)
+		}
+	}
+
+	count, err = CountCommitStatusesLinkingDeletedRuns(t.Context())
+	require.NoError(t, err)
+	assert.Zero(t, count)
 }

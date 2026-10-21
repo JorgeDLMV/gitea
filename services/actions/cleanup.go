@@ -6,11 +6,14 @@ package actions
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	actions_model "gitea.dev/models/actions"
 	"gitea.dev/models/db"
 	git_model "gitea.dev/models/git"
+	repo_model "gitea.dev/models/repo"
 	actions_module "gitea.dev/modules/actions"
 	"gitea.dev/modules/container"
 	"gitea.dev/modules/log"
@@ -340,4 +343,89 @@ func cleanupOldRuns(ctx context.Context, olderThan timeutil.TimeStamp, doneStatu
 		}
 	}
 	return total, nil
+}
+
+var commitStatusCheckBatchSize = 1000
+
+// CountCommitStatusesLinkingDeletedRuns counts the Gitea Actions commit statuses whose job no longer exists.
+func CountCommitStatusesLinkingDeletedRuns(ctx context.Context) (int64, error) {
+	var count int64
+	err := iterateCommitStatusesLinkingDeletedRuns(ctx, func(statuses []*git_model.CommitStatus) error {
+		count += int64(len(statuses))
+		return nil
+	})
+	return count, err
+}
+
+// FixCommitStatusesLinkingDeletedRuns clears the links of the Gitea Actions commit statuses whose job no longer exists, keeping their states.
+func FixCommitStatusesLinkingDeletedRuns(ctx context.Context) (int64, error) {
+	var fixed int64
+	err := iterateCommitStatusesLinkingDeletedRuns(ctx, func(statuses []*git_model.CommitStatus) error {
+		targetURLs := make(map[git_model.RepoSHA][]string)
+		for _, status := range statuses {
+			key := git_model.RepoSHA{RepoID: status.RepoID, SHA: status.SHA}
+			targetURLs[key] = append(targetURLs[key], status.TargetURL)
+		}
+		for key, urls := range targetURLs {
+			if err := git_model.ClearCommitStatusTargetURLs(ctx, key.RepoID, key.SHA, urls); err != nil {
+				return err
+			}
+		}
+		fixed += int64(len(statuses))
+		return nil
+	})
+	return fixed, err
+}
+
+func iterateCommitStatusesLinkingDeletedRuns(ctx context.Context, fn func([]*git_model.CommitStatus) error) error {
+	var lastID int64
+	for {
+		statuses := make([]*git_model.CommitStatus, 0, commitStatusCheckBatchSize)
+		if err := db.GetEngine(ctx).Where("id > ?", lastID).And(builder.Like{"target_url", "/actions/runs/"}).
+			OrderBy("id").Limit(commitStatusCheckBatchSize).Find(&statuses); err != nil {
+			return err
+		}
+		if len(statuses) == 0 {
+			return nil
+		}
+		lastID = statuses[len(statuses)-1].ID
+
+		repoIDs := container.FilterSlice(statuses, func(s *git_model.CommitStatus) (int64, bool) { return s.RepoID, true })
+		repos, err := repo_model.GetRepositoriesMapByIDs(ctx, repoIDs)
+		if err != nil {
+			return err
+		}
+		runIDsByStatus := make(map[*git_model.CommitStatus]int64)
+		jobIDsByStatus := make(map[*git_model.CommitStatus]int64)
+		for _, status := range statuses {
+			if status.Repo = repos[status.RepoID]; status.Repo == nil {
+				continue // statuses of deleted repositories are not ours to fix
+			}
+			if runID, jobID, ok := status.ParseGiteaActionsTargetURL(ctx); ok {
+				runIDsByStatus[status] = runID
+				jobIDsByStatus[status] = jobID
+			}
+		}
+		if len(jobIDsByStatus) == 0 {
+			continue
+		}
+
+		jobs := make(map[int64]*actions_model.ActionRunJob, len(jobIDsByStatus))
+		if err := db.GetEngine(ctx).In("id", slices.Collect(maps.Values(jobIDsByStatus))).Cols("id", "repo_id", "run_id").Find(&jobs); err != nil {
+			return err
+		}
+		var linkingDeleted []*git_model.CommitStatus
+		for status, jobID := range jobIDsByStatus {
+			job := jobs[jobID]
+			// a job of another run or repository is not what the link shows either: the page is a 404
+			if job == nil || job.RepoID != status.RepoID || job.RunID != runIDsByStatus[status] {
+				linkingDeleted = append(linkingDeleted, status)
+			}
+		}
+		if len(linkingDeleted) > 0 {
+			if err := fn(linkingDeleted); err != nil {
+				return err
+			}
+		}
+	}
 }

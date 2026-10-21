@@ -67,8 +67,8 @@ func UpdateCommitStatusSummary(ctx context.Context, repoID int64, sha string) er
 	// mysql will return 0 when update a record which state hasn't been changed which behaviour is different from other database,
 	// so we need to use insert in on duplicate
 	if setting.Database.Type.IsMySQL() {
-		_, err := db.GetEngine(ctx).Exec("INSERT INTO commit_status_summary (repo_id,sha,state,target_url) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE state=?",
-			repoID, sha, state.State, state.TargetURL, state.State)
+		_, err := db.GetEngine(ctx).Exec("INSERT INTO commit_status_summary (repo_id,sha,state,target_url) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE state=?, target_url=?",
+			repoID, sha, state.State, state.TargetURL, state.State, state.TargetURL)
 		return err
 	}
 
@@ -89,4 +89,18 @@ func UpdateCommitStatusSummary(ctx context.Context, repoID int64, sha string) er
 		return err
 	}
 	return nil
+}
+
+// ClearCommitStatusTargetURLs empties the given target URLs on a commit's statuses and refreshes its summary.
+// The states are kept, so required status checks are not affected.
+func ClearCommitStatusTargetURLs(ctx context.Context, repoID int64, sha string, targetURLs []string) error {
+	if len(targetURLs) == 0 {
+		return nil
+	}
+	cnt, err := db.GetEngine(ctx).Where("repo_id = ? AND sha = ?", repoID, sha).In("target_url", targetURLs).
+		Cols("target_url").NoAutoTime().Update(&CommitStatus{})
+	if err != nil || cnt == 0 {
+		return err
+	}
+	return UpdateCommitStatusSummary(ctx, repoID, sha)
 }

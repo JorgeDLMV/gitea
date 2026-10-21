@@ -10,6 +10,7 @@ import (
 
 	actions_model "gitea.dev/models/actions"
 	"gitea.dev/models/db"
+	git_model "gitea.dev/models/git"
 	actions_module "gitea.dev/modules/actions"
 	"gitea.dev/modules/container"
 	"gitea.dev/modules/log"
@@ -231,7 +232,24 @@ func DeleteRun(ctx context.Context, run *actions_model.ActionRun) error {
 		RunID:  run.ID,
 	})
 
+	if err := run.LoadRepo(ctx); err != nil {
+		return err
+	}
+	// no commit status was created if the event isn't supported or the commit can't be resolved
+	_, statusCommitID, _ := getCommitStatusEventNameAndCommitID(run)
+	statusTargetURLs := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		statusTargetURLs = append(statusTargetURLs, commitStatusTargetURL(run, job))
+	}
+
 	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		// keep the statuses for required checks, only drop the links to the deleted run
+		if statusCommitID != "" {
+			if err := git_model.ClearCommitStatusTargetURLs(ctx, repoID, statusCommitID, statusTargetURLs); err != nil {
+				return err
+			}
+		}
+
 		// TODO: Deleting task records could break current ephemeral runner implementation. This is a temporary workaround suggested by ChristopherHX.
 		// Since you delete potentially the only task an ephemeral runner has ever run, please delete the affected runners first.
 		// one of

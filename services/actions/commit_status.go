@@ -147,8 +147,11 @@ func createCommitStatus(ctx context.Context, repo *repo_model.Repository, event,
 		// scopedPrefix is computed once per run by the caller. The settings page derives the same string to preview expected checks.
 		ctxName = actions_module.ScopedWorkflowStatusContextName(scopedPrefix, displayName, job.Name, event)
 	}
-	targetURL := fmt.Sprintf("%s/jobs/%d", run.Link(), job.ID)
-	return createWorkflowCommitStatus(ctx, repo, commitID, ctxName, run.WorkflowID, toCommitStatus(job.Status), targetURL, toCommitStatusDescription(job), pendingFilter.onlyReplace(job, ctxName))
+	return createWorkflowCommitStatus(ctx, repo, commitID, ctxName, run.WorkflowID, toCommitStatus(job.Status), commitStatusTargetURL(run, job), toCommitStatusDescription(job), pendingFilter.onlyReplace(job, ctxName))
+}
+
+func commitStatusTargetURL(run *actions_model.ActionRun, job *actions_model.ActionRunJob) string {
+	return fmt.Sprintf("%s/jobs/%d", run.Link(), job.ID)
 }
 
 // pendingJobFilter keeps optional Pending jobs from posting new statuses

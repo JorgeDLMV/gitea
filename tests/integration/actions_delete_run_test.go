@@ -14,12 +14,16 @@ import (
 	runnerv1 "gitea.dev/actionslib/runner/v1"
 	actions_model "gitea.dev/models/actions"
 	auth_model "gitea.dev/models/auth"
+	"gitea.dev/models/db"
+	git_model "gitea.dev/models/git"
 	"gitea.dev/models/unittest"
 	user_model "gitea.dev/models/user"
+	"gitea.dev/modules/commitstatus"
 	"gitea.dev/modules/json"
 	"gitea.dev/routers/web/repo/actions"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -123,6 +127,7 @@ jobs:
 		createWorkflowFile(t, token, user2.Name, apiRepo.Name, testCase.treePath, opts)
 
 		var runID int64
+		var commitSHA string
 		for i := 0; i < len(testCase.outcomes); i++ {
 			task := runner.fetchTask(t)
 			jobName := getTaskJobNameByTaskID(t, token, user2.Name, apiRepo.Name, task.Id)
@@ -134,6 +139,14 @@ jobs:
 			assert.NoError(t, err)
 			run := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{RepoID: apiRepo.ID, Index: parsedRunIndex})
 			runID = run.ID
+			commitSHA = run.CommitSHA
+		}
+
+		statuses, err := git_model.GetLatestCommitStatus(t.Context(), apiRepo.ID, commitSHA, db.ListOptionsAll)
+		require.NoError(t, err)
+		require.Len(t, statuses, len(testCase.outcomes))
+		for _, status := range statuses {
+			assert.Contains(t, status.TargetURL, fmt.Sprintf("/actions/runs/%d/jobs/", runID))
 		}
 
 		jobs, err := actions_model.GetLatestAttemptJobsByRepoAndRunID(t.Context(), apiRepo.ID, runID)
@@ -164,6 +177,17 @@ jobs:
 
 		req = NewRequest(t, "GET", fmt.Sprintf("/%s/%s/actions/runs/%d", user2.Name, apiRepo.Name, runID))
 		session.MakeRequest(t, req, http.StatusNotFound)
+
+		statuses, err = git_model.GetLatestCommitStatus(t.Context(), apiRepo.ID, commitSHA, db.ListOptionsAll)
+		require.NoError(t, err)
+		require.Len(t, statuses, len(testCase.outcomes))
+		for _, status := range statuses {
+			assert.Equal(t, commitstatus.CommitStatusSuccess, status.State)
+			assert.Empty(t, status.TargetURL)
+		}
+		summary := unittest.AssertExistsAndLoadBean(t, &git_model.CommitStatusSummary{RepoID: apiRepo.ID, SHA: commitSHA})
+		assert.Equal(t, commitstatus.CommitStatusSuccess, summary.State)
+		assert.Empty(t, summary.TargetURL)
 
 		for i := 0; i < len(testCase.outcomes); i++ {
 			jobID := jobs[i].ID

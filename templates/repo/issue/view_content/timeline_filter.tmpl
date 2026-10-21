@@ -13,11 +13,10 @@
 			</span>
 			{{svg "octicon-triangle-down" 14 "dropdown icon"}}
 			<div class="menu">
-				{{$reload := "#issue-timeline-filter, #issue-timeline-comments"}}
-				<a class="{{if eq .TimelineFilter "all"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=all" data-fetch-reload="{{$reload}}" data-fetch-indicator="$body #issue-timeline-comments">{{ctx.Locale.Tr "repo.issues.timeline_filter.all"}}</a>
-				<a class="{{if eq .TimelineFilter "comments"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=comments" data-fetch-reload="{{$reload}}" data-fetch-indicator="$body #issue-timeline-comments">{{ctx.Locale.Tr "repo.issues.timeline_filter.comments"}}</a>
+				<a class="{{if eq .TimelineFilter "all"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=all" data-fetch-reload="#issue-timeline-filter, #issue-timeline-comments" data-fetch-indicator="$body #issue-timeline-comments">{{ctx.Locale.Tr "repo.issues.timeline_filter.all"}}</a>
+				<a class="{{if eq .TimelineFilter "comments"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=comments" data-fetch-reload="#issue-timeline-filter, #issue-timeline-comments" data-fetch-indicator="$body #issue-timeline-comments">{{ctx.Locale.Tr "repo.issues.timeline_filter.comments"}}</a>
 				{{if .HasHiddenCommentTypes}}
-					<a class="{{if eq .TimelineFilter "custom"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=custom" data-fetch-reload="{{$reload}}" data-fetch-indicator="$body #issue-timeline-comments">{{ctx.Locale.Tr "repo.issues.timeline_filter.custom"}}</a>
+					<a class="{{if eq .TimelineFilter "custom"}}active {{end}}item link-action" data-url="{{AppSubUrl}}/user/settings/appearance/timeline_filter?filter=custom" data-fetch-reload="#issue-timeline-filter, #issue-timeline-comments" data-fetch-indicator="$body #issue-timeline-comments">{{ctx.Locale.Tr "repo.issues.timeline_filter.custom"}}</a>
 				{{end}}
 				<div class="divider"></div>
 				<a class="item" href="{{AppSubUrl}}/user/settings/appearance#hidden-comment-types">{{ctx.Locale.Tr "repo.issues.timeline_filter.customize"}}</a>

@@ -385,18 +385,22 @@ func GetConcurrencyWaiters(ctx context.Context, repoID int64, concurrencyGroup s
 
 func findConcurrencyGroupEntries(ctx context.Context, repoID int64, concurrencyGroup string, attemptCond, jobCond builder.Cond) ([]*ActionRunAttempt, []*ActionRunJob, error) {
 	groupCond := builder.Eq{"repo_id": repoID, "concurrency_group": concurrencyGroup}
+	// oldest first, so the waiters of a queue are woken in FIFO order
 	attempts := make([]*ActionRunAttempt, 0)
-	if err := db.GetEngine(ctx).Where(groupCond.And(attemptCond)).Find(&attempts); err != nil {
+	if err := db.GetEngine(ctx).Where(groupCond.And(attemptCond)).Asc("id").Find(&attempts); err != nil {
 		return nil, nil, fmt.Errorf("find run attempts: %w", err)
 	}
 	jobs := make([]*ActionRunJob, 0)
-	if err := db.GetEngine(ctx).Where(groupCond.And(jobCond)).Find(&jobs); err != nil {
+	if err := db.GetEngine(ctx).Where(groupCond.And(jobCond)).Asc("id").Find(&jobs); err != nil {
 		return nil, nil, fmt.Errorf("find jobs: %w", err)
 	}
 	return attempts, jobs, nil
 }
 
-func getConcurrencyEntriesToReplace(ctx context.Context, repoID int64, concurrencyGroup string, cancelInProgress bool) ([]*ActionRunAttempt, []*ActionRunJob, error) {
+func getConcurrencyEntriesToReplace(ctx context.Context, repoID int64, concurrencyGroup string, cancelInProgress, queueMax bool) ([]*ActionRunAttempt, []*ActionRunJob, error) {
+	if queueMax {
+		return nil, nil, nil // the waiters keep their place in the queue
+	}
 	if !cancelInProgress {
 		return GetConcurrencyWaiters(ctx, repoID, concurrencyGroup)
 	}
@@ -409,7 +413,7 @@ func CancelPreviousJobsByRunConcurrency(ctx context.Context, attempt *ActionRunA
 		return nil, nil
 	}
 
-	attempts, jobs, err := getConcurrencyEntriesToReplace(ctx, attempt.RepoID, attempt.ConcurrencyGroup, attempt.ConcurrencyCancel)
+	attempts, jobs, err := getConcurrencyEntriesToReplace(ctx, attempt.RepoID, attempt.ConcurrencyGroup, attempt.ConcurrencyCancel, attempt.ConcurrencyQueueMax)
 	if err != nil {
 		return nil, fmt.Errorf("find concurrent runs and jobs: %w", err)
 	}

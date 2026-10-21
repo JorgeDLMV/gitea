@@ -850,6 +850,79 @@ jobs:
 	})
 }
 
+func TestWorkflowConcurrencyQueueMax(t *testing.T) {
+	onGiteaRun(t, func(t *testing.T, u *url.URL) {
+		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+		session := loginUser(t, user2.Name)
+		token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository, auth_model.AccessTokenScopeWriteUser)
+
+		apiRepo := createActionsTestRepo(t, token, "actions-concurrency", false)
+		repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: apiRepo.ID})
+		httpContext := NewAPITestContext(t, user2.Name, repo.Name, auth_model.AccessTokenScopeWriteRepository)
+		defer doAPIDeleteRepository(httpContext)(t)
+
+		runner := newMockRunner()
+		runner.registerAsRepoRunner(t, user2.Name, repo.Name, "mock-runner", []string{"ubuntu-latest"}, false)
+
+		for _, tc := range []struct {
+			name, workflowID, content string
+		}{
+			{
+				name:       "workflow level",
+				workflowID: "queue-workflow.yml",
+				content: `name: queue-workflow
+on: workflow_dispatch
+concurrency:
+  group: deploy
+  queue: max
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo deploy
+`,
+			},
+			{
+				name:       "job level",
+				workflowID: "queue-job.yml",
+				content: `name: queue-job
+on: workflow_dispatch
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-job
+      queue: max
+    steps:
+      - run: echo deploy
+`,
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				treePath := ".gitea/workflows/" + tc.workflowID
+				createWorkflowFile(t, token, user2.Name, repo.Name, treePath, getWorkflowCreateFileOptions(user2, repo.DefaultBranch, "create "+treePath, tc.content))
+
+				urlStr := fmt.Sprintf("/%s/%s/actions/run?workflow=%s", user2.Name, repo.Name, tc.workflowID)
+				for range 3 {
+					session.MakeRequest(t, NewRequestWithValues(t, "POST", urlStr, map[string]string{"ref": "refs/heads/main"}), http.StatusSeeOther)
+				}
+
+				// the runs wait in the queue instead of replacing each other, and start one at a time in FIFO order
+				var startedRunIDs []int64
+				for range 3 {
+					task := runner.fetchTask(t)
+					_, _, run := getTaskAndJobAndRunByTaskID(t, task.Id)
+					runner.fetchNoTask(t)
+					startedRunIDs = append(startedRunIDs, run.ID)
+					runner.execTask(t, task, &mockTaskOutcome{result: runnerv1.Result_RESULT_SUCCESS})
+				}
+				assert.IsIncreasing(t, startedRunIDs)
+				assert.Equal(t, 3, unittest.GetCount(t, &actions_model.ActionRun{RepoID: repo.ID, WorkflowID: tc.workflowID, Status: actions_model.StatusSuccess}))
+			})
+		}
+	})
+}
+
 func TestWorkflowDispatchRerunAllJobsConcurrency(t *testing.T) {
 	onGiteaRun(t, func(t *testing.T, u *url.URL) {
 		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})

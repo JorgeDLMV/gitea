@@ -28,8 +28,9 @@ type ActionRunAttempt struct {
 	TriggerUserID int64
 	TriggerUser   *user_model.User `xorm:"-"`
 
-	ConcurrencyGroup  string `xorm:"index(repo_concurrency_status) NOT NULL DEFAULT ''"`
-	ConcurrencyCancel bool   `xorm:"NOT NULL DEFAULT FALSE"`
+	ConcurrencyGroup    string `xorm:"index(repo_concurrency_status) NOT NULL DEFAULT ''"`
+	ConcurrencyCancel   bool   `xorm:"NOT NULL DEFAULT FALSE"`
+	ConcurrencyQueueMax bool   `xorm:"NOT NULL DEFAULT FALSE"`
 
 	Status  Status `xorm:"index(repo_concurrency_status)"`
 	Started timeutil.TimeStamp

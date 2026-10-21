@@ -534,3 +534,31 @@ jobs:
 		}
 	})
 }
+
+func TestEvaluateConcurrency(t *testing.T) {
+	for _, tc := range []struct {
+		raw     string
+		want    EvaluatedConcurrency
+		wantErr string
+	}{
+		{raw: "deploy", want: EvaluatedConcurrency{Group: "deploy"}},
+		{raw: "group: deploy\ncancel-in-progress: true", want: EvaluatedConcurrency{Group: "deploy", CancelInProgress: true}},
+		{raw: "group: deploy\nqueue: single", want: EvaluatedConcurrency{Group: "deploy"}},
+		{raw: "group: deploy\nqueue: max", want: EvaluatedConcurrency{Group: "deploy", QueueMax: true}},
+		{raw: "group: deploy\nqueue: ${{ 'max' }}", want: EvaluatedConcurrency{Group: "deploy", QueueMax: true}},
+		{raw: "group: deploy\nqueue: max\ncancel-in-progress: true", wantErr: "queue: max cannot be combined with cancel-in-progress: true"},
+		{raw: "group: deploy\nqueue: forever", wantErr: `invalid concurrency queue "forever"`},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			var rc model.RawConcurrency
+			require.NoError(t, yaml.Unmarshal([]byte(tc.raw), &rc))
+			got, err := EvaluateConcurrency(&rc, "", nil, map[string]any{}, nil, nil, nil)
+			if tc.wantErr != "" {
+				assert.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

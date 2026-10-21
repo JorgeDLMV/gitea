@@ -296,6 +296,7 @@ func execRerunPlan(ctx context.Context, plan *rerunPlan) (*actions_model.ActionR
 				newJob.Stopped = 0
 				newJob.ConcurrencyGroup = ""
 				newJob.ConcurrencyCancel = false
+				newJob.ConcurrencyQueueMax = false
 				newJob.IsConcurrencyEvaluated = false
 
 				if templateJob.IsReusableCaller {
@@ -554,6 +555,7 @@ func cloneRunJobForAttempt(templateJob *actions_model.ActionRunJob, attempt *act
 		IsConcurrencyEvaluated: templateJob.IsConcurrencyEvaluated,
 		ConcurrencyGroup:       templateJob.ConcurrencyGroup,
 		ConcurrencyCancel:      templateJob.ConcurrencyCancel,
+		ConcurrencyQueueMax:    templateJob.ConcurrencyQueueMax,
 		TokenPermissions:       templateJob.TokenPermissions,
 		MaxParallel:            templateJob.MaxParallel,
 

@@ -178,6 +178,51 @@ func TestPrepareToStartWithConcurrency_WaitingJobHoldsGroup(t *testing.T) {
 	assert.Equal(t, previousJob.ID, cancelled[0].ID)
 }
 
+func TestPrepareToStartWithConcurrency_QueueMax(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&setting.Actions.ConcurrencyQueueLimit, 2)()
+
+	const concurrencyGroup = "test-queue-max"
+	newGroupJob := func(runIndex int64, status actions_model.Status) *actions_model.ActionRunJob {
+		_, attempt := createRunAttempt(t, runIndex, "", actions_model.StatusWaiting)
+		job := &actions_model.ActionRunJob{
+			RunID: attempt.RunID, RunAttemptID: attempt.ID, RepoID: attempt.RepoID, Status: status,
+			RawConcurrency: concurrencyGroup, IsConcurrencyEvaluated: true, ConcurrencyGroup: concurrencyGroup, ConcurrencyQueueMax: true,
+		}
+		require.NoError(t, db.Insert(t.Context(), job))
+		return job
+	}
+	newGroupJob(9910, actions_model.StatusWaiting)
+	firstWaiter := newGroupJob(9911, actions_model.StatusBlocked)
+	entering := &actions_model.ActionRunJob{RepoID: firstWaiter.RepoID, RawConcurrency: concurrencyGroup, IsConcurrencyEvaluated: true, ConcurrencyGroup: concurrencyGroup, ConcurrencyQueueMax: true}
+
+	// the queue has room: the entering job waits behind the first waiter instead of replacing it
+	status, cancelled, err := PrepareToStartJobWithConcurrency(t.Context(), entering)
+	require.NoError(t, err)
+	assert.Equal(t, actions_model.StatusBlocked, status)
+	assert.Empty(t, cancelled)
+
+	// the queue is full: a new job or run is cancelled, but a waiter checked again keeps its place
+	newGroupJob(9912, actions_model.StatusBlocked)
+	status, cancelled, err = PrepareToStartJobWithConcurrency(t.Context(), entering)
+	require.NoError(t, err)
+	assert.Equal(t, actions_model.StatusCancelled, status)
+	assert.Empty(t, cancelled)
+	status, _, err = PrepareToStartRunWithConcurrency(t.Context(), &actions_model.ActionRunAttempt{RepoID: firstWaiter.RepoID, ConcurrencyGroup: concurrencyGroup, ConcurrencyQueueMax: true})
+	require.NoError(t, err)
+	assert.Equal(t, actions_model.StatusCancelled, status)
+	status, _, err = PrepareToStartJobWithConcurrency(t.Context(), firstWaiter)
+	require.NoError(t, err)
+	assert.Equal(t, actions_model.StatusBlocked, status)
+
+	// without `queue: max`, the entering job replaces every waiter, as before
+	entering.ConcurrencyQueueMax = false
+	status, cancelled, err = PrepareToStartJobWithConcurrency(t.Context(), entering)
+	require.NoError(t, err)
+	assert.Equal(t, actions_model.StatusBlocked, status)
+	assert.Len(t, cancelled, 2)
+}
+
 func TestShouldBlockRunByConcurrency_CancellingJobBlocks(t *testing.T) {
 	assert.NoError(t, unittest.PrepareTestDatabase())
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"gitea.dev/actionslib/pkg/model"
+	"gitea.dev/modules/util"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -555,6 +556,7 @@ func TestEvaluateConcurrency(t *testing.T) {
 			got, err := EvaluateConcurrency(&rc, "", nil, map[string]any{}, nil, nil, nil)
 			if tc.wantErr != "" {
 				assert.ErrorContains(t, err, tc.wantErr)
+				assert.ErrorIs(t, err, util.ErrInvalidArgument)
 				return
 			}
 			require.NoError(t, err)

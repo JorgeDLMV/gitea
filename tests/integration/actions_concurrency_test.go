@@ -20,6 +20,7 @@ import (
 	user_model "gitea.dev/models/user"
 	"gitea.dev/modules/setting"
 	api "gitea.dev/modules/structs"
+	"gitea.dev/modules/test"
 	"gitea.dev/modules/timeutil"
 	webhook_module "gitea.dev/modules/webhook"
 	actions_web "gitea.dev/routers/web/repo/actions"
@@ -898,6 +899,7 @@ jobs:
 `,
 			},
 		} {
+			var firstRunID int64
 			t.Run(tc.name, func(t *testing.T) {
 				treePath := ".gitea/workflows/" + tc.workflowID
 				createWorkflowFile(t, token, user2.Name, repo.Name, treePath, getWorkflowCreateFileOptions(user2, repo.DefaultBranch, "create "+treePath, tc.content))
@@ -918,8 +920,78 @@ jobs:
 				}
 				assert.IsIncreasing(t, startedRunIDs)
 				assert.Equal(t, 3, unittest.GetCount(t, &actions_model.ActionRun{RepoID: repo.ID, WorkflowID: tc.workflowID, Status: actions_model.StatusSuccess}))
+				firstRunID = startedRunIDs[0]
+			})
+
+			t.Run(tc.name+" full queue", func(t *testing.T) {
+				defer test.MockVariableValue(&setting.Actions.ConcurrencyQueueLimit, 1)()
+				urlStr := fmt.Sprintf("/%s/%s/actions/run?workflow=%s", user2.Name, repo.Name, tc.workflowID)
+				dispatch := func() {
+					session.MakeRequest(t, NewRequestWithValues(t, "POST", urlStr, map[string]string{"ref": "refs/heads/main"}), http.StatusSeeOther)
+				}
+
+				// the first run starts and the second one waits, then a rerun and a third run find the queue full and are cancelled
+				dispatch()
+				dispatch()
+				req := NewRequest(t, "POST", fmt.Sprintf("/api/v1/repos/%s/%s/actions/runs/%d/rerun", user2.Name, repo.Name, firstRunID)).AddTokenAuth(token)
+				MakeRequest(t, req, http.StatusCreated)
+				dispatch()
+				for range 2 {
+					task := runner.fetchTask(t)
+					runner.fetchNoTask(t)
+					runner.execTask(t, task, &mockTaskOutcome{result: runnerv1.Result_RESULT_SUCCESS})
+				}
+				runner.fetchNoTask(t)
+				assert.Equal(t, actions_model.StatusCancelled, unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{ID: firstRunID}).Status)
+				assert.Equal(t, 4, unittest.GetCount(t, &actions_model.ActionRun{RepoID: repo.ID, WorkflowID: tc.workflowID, Status: actions_model.StatusSuccess}))
+				assert.Equal(t, 2, unittest.GetCount(t, &actions_model.ActionRun{RepoID: repo.ID, WorkflowID: tc.workflowID, Status: actions_model.StatusCancelled}))
 			})
 		}
+
+		t.Run("job with needs and full queue", func(t *testing.T) {
+			defer test.MockVariableValue(&setting.Actions.ConcurrencyQueueLimit, 1)()
+			treePath := ".gitea/workflows/queue-needs.yml"
+			createWorkflowFile(t, token, user2.Name, repo.Name, treePath, getWorkflowCreateFileOptions(user2, repo.DefaultBranch, "create "+treePath, `name: queue-needs
+on: workflow_dispatch
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo prepare
+  deploy-after-prepare:
+    needs: prepare
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-after-prepare
+      queue: max
+    steps:
+      - run: echo deploy
+`))
+			urlStr := fmt.Sprintf("/%s/%s/actions/run?workflow=%s", user2.Name, repo.Name, "queue-needs.yml")
+			for range 3 {
+				session.MakeRequest(t, NewRequestWithValues(t, "POST", urlStr, map[string]string{"ref": "refs/heads/main"}), http.StatusSeeOther)
+			}
+
+			// each deploy job enters the group when its needs are done: while the first one runs, the second waits and the third is cancelled
+			var runningDeploy *runnerv1.Task
+			for preparesDone := 0; preparesDone < 3 || runningDeploy == nil; {
+				task := runner.fetchTask(t)
+				if _, job, _ := getTaskAndJobAndRunByTaskID(t, task.Id); job.JobID == "deploy-after-prepare" {
+					require.Nil(t, runningDeploy, "a second deploy job started while the first one runs")
+					runningDeploy = task
+					continue
+				}
+				runner.execTask(t, task, &mockTaskOutcome{result: runnerv1.Result_RESULT_SUCCESS})
+				preparesDone++
+			}
+			runner.fetchNoTask(t)
+			runner.execTask(t, runningDeploy, &mockTaskOutcome{result: runnerv1.Result_RESULT_SUCCESS})
+			runner.execTask(t, runner.fetchTask(t), &mockTaskOutcome{result: runnerv1.Result_RESULT_SUCCESS})
+			runner.fetchNoTask(t)
+			assert.Equal(t, 2, unittest.GetCount(t, &actions_model.ActionRunJob{RepoID: repo.ID, JobID: "deploy-after-prepare", Status: actions_model.StatusSuccess}))
+			cancelled := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRunJob{RepoID: repo.ID, JobID: "deploy-after-prepare", Status: actions_model.StatusCancelled})
+			assert.NotZero(t, cancelled.Stopped)
+		})
 	})
 }
 

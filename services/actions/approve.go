@@ -56,6 +56,14 @@ func ApproveRuns(ctx context.Context, repo *repo_model.Repository, doer *user_mo
 					return err
 				}
 				cancelledConcurrencyJobs = append(cancelledConcurrencyJobs, jobsToCancel...)
+				if status == actions_model.StatusCancelled { // the run found its concurrency queue full
+					cancelledJobs, err := actions_model.CancelJobs(ctx, jobs, false)
+					if err != nil {
+						return err
+					}
+					cancelledConcurrencyJobs = append(cancelledConcurrencyJobs, cancelledJobs...)
+					continue
+				}
 				if status == actions_model.StatusBlocked {
 					continue
 				}
@@ -120,6 +128,17 @@ func ApproveRuns(ctx context.Context, repo *repo_model.Repository, doer *user_mo
 					return err
 				}
 				cancelledConcurrencyJobs = append(cancelledConcurrencyJobs, jobsToCancel...)
+				if job.Status == actions_model.StatusCancelled { // the job found its concurrency queue full
+					job.Stopped = timeutil.TimeStampNow()
+					n, err := actions_model.UpdateRunJob(ctx, job, builder.Eq{"status": actions_model.StatusBlocked}, "status", "stopped")
+					if err != nil {
+						return err
+					}
+					if n > 0 {
+						updatedJobs = append(updatedJobs, job)
+					}
+					continue
+				}
 				applyMaxParallel(job, slots)
 				if job.Status != actions_model.StatusWaiting {
 					continue

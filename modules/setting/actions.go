@@ -19,6 +19,7 @@ const (
 	defaultArtifactRetentionDays  = 90
 	defaultLogRetentionDays       = 365
 	defaultRunRetentionDays       = 400
+	defaultConcurrencyQueueLimit  = 100
 )
 
 // Actions settings
@@ -43,6 +44,9 @@ var (
 		// transaction at once per Gitea instance, to avoid a thundering herd when many
 		// runners poll together. It is a per-process limit, not a cluster-wide one.
 		MaxConcurrentTaskPicks int `ini:"MAX_CONCURRENT_TASK_PICKS"`
+		// ConcurrencyQueueLimit is how many runs or jobs may wait in a `queue: max` concurrency group,
+		// further ones are cancelled.
+		ConcurrencyQueueLimit int `ini:"CONCURRENCY_QUEUE_LIMIT"`
 
 		ArtifactPreviewMaxSize int64 `ini:"ARTIFACT_PREVIEW_MAX_SIZE"`
 	}{
@@ -53,6 +57,7 @@ var (
 		ScopedWorkflowDirs:     []string{".gitea/scoped_workflows"},
 		MaxRerunAttempts:       defaultMaxRerunAttempts,
 		MaxConcurrentTaskPicks: defaultMaxConcurrentTaskPicks,
+		ConcurrencyQueueLimit:  defaultConcurrencyQueueLimit,
 		ArtifactPreviewMaxSize: 10 * 1024 * 1024,
 		LogRetentionDays:       defaultLogRetentionDays,
 		ArtifactRetentionDays:  defaultArtifactRetentionDays,

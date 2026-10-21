@@ -344,11 +344,11 @@ func EvaluateConcurrency(rc *model.RawConcurrency, jobID string, job *Job, gitCt
 	case "", "single":
 	case "max":
 		if concurrency.CancelInProgress {
-			return EvaluatedConcurrency{}, errors.New("concurrency queue: max cannot be combined with cancel-in-progress: true")
+			return EvaluatedConcurrency{}, util.NewInvalidArgumentErrorf("concurrency queue: max cannot be combined with cancel-in-progress: true")
 		}
 		concurrency.QueueMax = true
 	default:
-		return EvaluatedConcurrency{}, fmt.Errorf("invalid concurrency queue %q, it must be single or max", evaluated.Queue)
+		return EvaluatedConcurrency{}, util.NewInvalidArgumentErrorf("invalid concurrency queue %q, it must be single or max", evaluated.Queue)
 	}
 	return concurrency, nil
 }

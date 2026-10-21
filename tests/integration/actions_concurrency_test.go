@@ -865,6 +865,18 @@ func TestWorkflowConcurrencyQueueMax(t *testing.T) {
 		runner := newMockRunner()
 		runner.registerAsRepoRunner(t, user2.Name, repo.Name, "mock-runner", []string{"ubuntu-latest"}, false)
 
+		createWorkflow := func(t *testing.T, workflowID, content string) {
+			treePath := ".gitea/workflows/" + workflowID
+			createWorkflowFile(t, token, user2.Name, repo.Name, treePath, getWorkflowCreateFileOptions(user2, repo.DefaultBranch, "create "+treePath, content))
+		}
+		dispatch := func(t *testing.T, workflowID string) {
+			urlStr := fmt.Sprintf("/%s/%s/actions/run?workflow=%s", user2.Name, repo.Name, workflowID)
+			session.MakeRequest(t, NewRequestWithValues(t, "POST", urlStr, map[string]string{"ref": "refs/heads/main"}), http.StatusSeeOther)
+		}
+		succeed := func(t *testing.T, task *runnerv1.Task) {
+			runner.execTask(t, task, &mockTaskOutcome{result: runnerv1.Result_RESULT_SUCCESS})
+		}
+
 		for _, tc := range []struct {
 			name, workflowID, content string
 		}{
@@ -899,59 +911,49 @@ jobs:
 `,
 			},
 		} {
-			var firstRunID int64
 			t.Run(tc.name, func(t *testing.T) {
-				treePath := ".gitea/workflows/" + tc.workflowID
-				createWorkflowFile(t, token, user2.Name, repo.Name, treePath, getWorkflowCreateFileOptions(user2, repo.DefaultBranch, "create "+treePath, tc.content))
-
-				urlStr := fmt.Sprintf("/%s/%s/actions/run?workflow=%s", user2.Name, repo.Name, tc.workflowID)
-				for range 3 {
-					session.MakeRequest(t, NewRequestWithValues(t, "POST", urlStr, map[string]string{"ref": "refs/heads/main"}), http.StatusSeeOther)
+				createWorkflow(t, tc.workflowID, tc.content)
+				countRuns := func(status actions_model.Status) int {
+					return unittest.GetCount(t, &actions_model.ActionRun{RepoID: repo.ID, WorkflowID: tc.workflowID, Status: status})
 				}
 
 				// the runs wait in the queue instead of replacing each other, and start one at a time in FIFO order
+				for range 3 {
+					dispatch(t, tc.workflowID)
+				}
 				var startedRunIDs []int64
 				for range 3 {
 					task := runner.fetchTask(t)
 					_, _, run := getTaskAndJobAndRunByTaskID(t, task.Id)
 					runner.fetchNoTask(t)
 					startedRunIDs = append(startedRunIDs, run.ID)
-					runner.execTask(t, task, &mockTaskOutcome{result: runnerv1.Result_RESULT_SUCCESS})
+					succeed(t, task)
 				}
 				assert.IsIncreasing(t, startedRunIDs)
-				assert.Equal(t, 3, unittest.GetCount(t, &actions_model.ActionRun{RepoID: repo.ID, WorkflowID: tc.workflowID, Status: actions_model.StatusSuccess}))
-				firstRunID = startedRunIDs[0]
-			})
+				assert.Equal(t, 3, countRuns(actions_model.StatusSuccess))
 
-			t.Run(tc.name+" full queue", func(t *testing.T) {
+				// with a queue of one, the first run starts and the second one waits, then a rerun and a third run find the queue full and are cancelled
 				defer test.MockVariableValue(&setting.Actions.ConcurrencyQueueLimit, 1)()
-				urlStr := fmt.Sprintf("/%s/%s/actions/run?workflow=%s", user2.Name, repo.Name, tc.workflowID)
-				dispatch := func() {
-					session.MakeRequest(t, NewRequestWithValues(t, "POST", urlStr, map[string]string{"ref": "refs/heads/main"}), http.StatusSeeOther)
-				}
-
-				// the first run starts and the second one waits, then a rerun and a third run find the queue full and are cancelled
-				dispatch()
-				dispatch()
-				req := NewRequest(t, "POST", fmt.Sprintf("/api/v1/repos/%s/%s/actions/runs/%d/rerun", user2.Name, repo.Name, firstRunID)).AddTokenAuth(token)
+				dispatch(t, tc.workflowID)
+				dispatch(t, tc.workflowID)
+				req := NewRequest(t, "POST", fmt.Sprintf("/api/v1/repos/%s/%s/actions/runs/%d/rerun", user2.Name, repo.Name, startedRunIDs[0])).AddTokenAuth(token)
 				MakeRequest(t, req, http.StatusCreated)
-				dispatch()
+				dispatch(t, tc.workflowID)
 				for range 2 {
 					task := runner.fetchTask(t)
 					runner.fetchNoTask(t)
-					runner.execTask(t, task, &mockTaskOutcome{result: runnerv1.Result_RESULT_SUCCESS})
+					succeed(t, task)
 				}
 				runner.fetchNoTask(t)
-				assert.Equal(t, actions_model.StatusCancelled, unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{ID: firstRunID}).Status)
-				assert.Equal(t, 4, unittest.GetCount(t, &actions_model.ActionRun{RepoID: repo.ID, WorkflowID: tc.workflowID, Status: actions_model.StatusSuccess}))
-				assert.Equal(t, 2, unittest.GetCount(t, &actions_model.ActionRun{RepoID: repo.ID, WorkflowID: tc.workflowID, Status: actions_model.StatusCancelled}))
+				assert.Equal(t, actions_model.StatusCancelled, unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{ID: startedRunIDs[0]}).Status)
+				assert.Equal(t, 4, countRuns(actions_model.StatusSuccess))
+				assert.Equal(t, 2, countRuns(actions_model.StatusCancelled))
 			})
 		}
 
-		t.Run("job with needs and full queue", func(t *testing.T) {
+		t.Run("job with needs", func(t *testing.T) {
 			defer test.MockVariableValue(&setting.Actions.ConcurrencyQueueLimit, 1)()
-			treePath := ".gitea/workflows/queue-needs.yml"
-			createWorkflowFile(t, token, user2.Name, repo.Name, treePath, getWorkflowCreateFileOptions(user2, repo.DefaultBranch, "create "+treePath, `name: queue-needs
+			createWorkflow(t, "queue-needs.yml", `name: queue-needs
 on: workflow_dispatch
 jobs:
   prepare:
@@ -966,27 +968,27 @@ jobs:
       queue: max
     steps:
       - run: echo deploy
-`))
-			urlStr := fmt.Sprintf("/%s/%s/actions/run?workflow=%s", user2.Name, repo.Name, "queue-needs.yml")
+`)
 			for range 3 {
-				session.MakeRequest(t, NewRequestWithValues(t, "POST", urlStr, map[string]string{"ref": "refs/heads/main"}), http.StatusSeeOther)
+				dispatch(t, "queue-needs.yml")
 			}
 
 			// each deploy job enters the group when its needs are done: while the first one runs, the second waits and the third is cancelled
 			var runningDeploy *runnerv1.Task
-			for preparesDone := 0; preparesDone < 3 || runningDeploy == nil; {
+			preparesDone := 0
+			for preparesDone < 3 || runningDeploy == nil {
 				task := runner.fetchTask(t)
 				if _, job, _ := getTaskAndJobAndRunByTaskID(t, task.Id); job.JobID == "deploy-after-prepare" {
 					require.Nil(t, runningDeploy, "a second deploy job started while the first one runs")
 					runningDeploy = task
 					continue
 				}
-				runner.execTask(t, task, &mockTaskOutcome{result: runnerv1.Result_RESULT_SUCCESS})
+				succeed(t, task)
 				preparesDone++
 			}
 			runner.fetchNoTask(t)
-			runner.execTask(t, runningDeploy, &mockTaskOutcome{result: runnerv1.Result_RESULT_SUCCESS})
-			runner.execTask(t, runner.fetchTask(t), &mockTaskOutcome{result: runnerv1.Result_RESULT_SUCCESS})
+			succeed(t, runningDeploy)
+			succeed(t, runner.fetchTask(t))
 			runner.fetchNoTask(t)
 			assert.Equal(t, 2, unittest.GetCount(t, &actions_model.ActionRunJob{RepoID: repo.ID, JobID: "deploy-after-prepare", Status: actions_model.StatusSuccess}))
 			cancelled := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRunJob{RepoID: repo.ID, JobID: "deploy-after-prepare", Status: actions_model.StatusCancelled})

@@ -178,7 +178,7 @@ func TestAPIViewPullsByBaseHead(t *testing.T) {
 	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
 	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: repo.OwnerID})
 
-	ctx := NewAPITestContext(t, "user2", repo.Name, auth_model.AccessTokenScopeReadRepository)
+	ctx := NewAPITestContext(t, "user2", repo.Name, auth_model.AccessTokenScopeWriteRepository)
 
 	req := NewRequestf(t, "GET", "/api/v1/repos/%s/%s/pulls/master/branch2", owner.Name, repo.Name).
 		AddTokenAuth(ctx.Token)
@@ -191,6 +191,22 @@ func TestAPIViewPullsByBaseHead(t *testing.T) {
 	req = NewRequestf(t, "GET", "/api/v1/repos/%s/%s/pulls/master/branch-not-exist", owner.Name, repo.Name).
 		AddTokenAuth(ctx.Token)
 	ctx.Session.MakeRequest(t, req, http.StatusNotFound)
+
+	// with a closed and an open pull request for the same branches, the open one is returned
+	req = NewRequestWithJSON(t, http.MethodPatch, fmt.Sprintf("/api/v1/repos/%s/%s/pulls/3", owner.Name, repo.Name), map[string]any{"state": "closed"}).
+		AddTokenAuth(ctx.Token)
+	ctx.Session.MakeRequest(t, req, http.StatusCreated)
+	req = NewRequestWithJSON(t, http.MethodPost, fmt.Sprintf("/api/v1/repos/%s/%s/pulls", owner.Name, repo.Name), &api.CreatePullRequestOption{
+		Head:  "branch2",
+		Base:  "master",
+		Title: "reopened as a new pull request",
+	}).AddTokenAuth(ctx.Token)
+	created := DecodeJSON(t, ctx.Session.MakeRequest(t, req, http.StatusCreated), &api.PullRequest{})
+
+	req = NewRequestf(t, "GET", "/api/v1/repos/%s/%s/pulls/master/branch2", owner.Name, repo.Name).
+		AddTokenAuth(ctx.Token)
+	pull = DecodeJSON(t, ctx.Session.MakeRequest(t, req, http.StatusOK), &api.PullRequest{})
+	assert.Equal(t, created.Index, pull.Index)
 }
 
 // TestAPIMergePullWIP ensures that we can't merge a WIP pull request

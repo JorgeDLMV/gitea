@@ -29176,6 +29176,7 @@
     },
     "/repos/{owner}/{repo}/pulls/{base}/{head}": {
       "get": {
+        "description": "If several pull requests match, the open one is returned, otherwise the most recent.",
         "operationId": "repoGetPullRequestByBaseHead",
         "parameters": [
           {

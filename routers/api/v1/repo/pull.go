@@ -216,6 +216,7 @@ func GetPullRequestByBaseHead(ctx *context.APIContext) {
 	// swagger:operation GET /repos/{owner}/{repo}/pulls/{base}/{head} repository repoGetPullRequestByBaseHead
 	// ---
 	// summary: Get a pull request by base and head
+	// description: If several pull requests match, the open one is returned, otherwise the most recent.
 	// produces:
 	// - application/json
 	// parameters:

@@ -16460,6 +16460,12 @@
             "in": "query"
           },
           {
+            "type": "string",
+            "description": "Filter by head of the pull request, as `branch`, `owner:branch` (the owner's fork) or `owner/repo:branch`",
+            "name": "head",
+            "in": "query"
+          },
+          {
             "enum": [
               "open",
               "closed",

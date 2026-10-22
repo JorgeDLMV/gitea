@@ -144,6 +144,27 @@ func TestAPIViewPulls(t *testing.T) {
 			}))
 	}
 
+	t.Run("FilterByHead", func(t *testing.T) {
+		for head, want := range map[string][]int64{
+			"branch2":                  {3},
+			"user2:branch2":            {3},
+			"user2/repo1:branch2":      {3},
+			"branch-not-exist":         {},
+			"user2:":                   {},
+			"user5:branch2":            {}, // no fork of repo1
+			"user-not-exist:branch2":   {},
+			"user-not-exist/x:branch2": {},
+		} {
+			var listed []*api.PullRequest
+			DecodeJSON(t, ctx.Session.MakeRequest(t, NewRequestf(t, "GET", "/api/v1/repos/%s/%s/pulls?state=all&head=%s", owner.Name, repo.Name, url.QueryEscape(head)).AddTokenAuth(ctx.Token), http.StatusOK), &listed)
+			indexes := make([]int64, 0, len(listed))
+			for _, pull := range listed {
+				indexes = append(indexes, pull.Index)
+			}
+			assert.ElementsMatch(t, want, indexes, head)
+		}
+	})
+
 	t.Run("HeadRepoHiddenWhenInaccessible", func(t *testing.T) {
 		session := loginUser(t, "user31")
 		forkToken := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository)
@@ -158,6 +179,14 @@ func TestAPIViewPulls(t *testing.T) {
 		var listed []*api.PullRequest
 		DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1/pulls?poster=user31"), http.StatusOK), &listed)
 		require.Len(t, listed, 1)
+
+		// a head in the owner's fork is found the same way it was given when creating the pull request
+		var byHead []*api.PullRequest
+		DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1/pulls?head=user31:branch2"), http.StatusOK), &byHead)
+		require.Len(t, byHead, 1)
+		assert.Equal(t, visible.Index, byHead[0].Index)
+		byBaseHead := DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1/pulls/master/user31:branch2"), http.StatusOK), &api.PullRequest{})
+		assert.Equal(t, visible.Index, byBaseHead.Index)
 		for _, hidden := range []*api.PullRequest{
 			DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", prURL), http.StatusOK), &api.PullRequest{}),
 			listed[0],

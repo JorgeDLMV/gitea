@@ -65,6 +65,10 @@ func ListPullRequests(ctx *context.APIContext) {
 	//   in: query
 	//   description: Filter by target base branch of the pull request
 	//   type: string
+	// - name: head
+	//   in: query
+	//   description: Filter by head of the pull request, as `branch`, `owner:branch` (the owner's fork) or `owner/repo:branch`
+	//   type: string
 	// - name: state
 	//   in: query
 	//   description: State of pull request
@@ -130,6 +134,21 @@ func ListPullRequests(ctx *context.APIContext) {
 		}
 		posterID = poster.ID
 	}
+	var headRepoID int64
+	var headBranch string
+	if head := ctx.FormTrim("head"); head != "" {
+		headRepoID, headBranch, err = parsePullRequestHead(ctx, head)
+		if err != nil {
+			// an unknown head matches no pull requests, without telling whether a hidden repository exists
+			if errors.Is(err, util.ErrNotExist) || errors.Is(err, util.ErrInvalidArgument) {
+				ctx.SetTotalCountHeader(0)
+				ctx.JSON(http.StatusOK, []*api.PullRequest{})
+			} else {
+				ctx.APIErrorInternal(err)
+			}
+			return
+		}
+	}
 	listOptions := utils.GetListOptions(ctx)
 	prs, maxResults, err := issues_model.PullRequests(ctx, ctx.Repo.Repository.ID, &issues_model.PullRequestsOptions{
 		ListOptions: listOptions,
@@ -139,6 +158,8 @@ func ListPullRequests(ctx *context.APIContext) {
 		MilestoneID: ctx.FormInt64("milestone"),
 		PosterID:    posterID,
 		BaseBranch:  ctx.FormTrim("base_branch"),
+		HeadRepoID:  headRepoID,
+		HeadBranch:  headBranch,
 	})
 	if err != nil {
 		ctx.APIErrorInternal(err)
@@ -246,34 +267,14 @@ func GetPullRequestByBaseHead(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	var headRepoID int64
-	var headBranch string
-	head := ctx.PathParam("*")
-	if strings.Contains(head, ":") {
-		split := strings.SplitN(head, ":", 2)
-		headBranch = split[1]
-		var owner, name string
-		if strings.Contains(split[0], "/") {
-			split = strings.Split(split[0], "/")
-			owner = split[0]
-			name = split[1]
+	headRepoID, headBranch, err := parsePullRequestHead(ctx, ctx.PathParam("*"))
+	if err != nil {
+		if errors.Is(err, util.ErrNotExist) || errors.Is(err, util.ErrInvalidArgument) {
+			ctx.APIErrorNotFound()
 		} else {
-			owner = split[0]
-			name = ctx.Repo.Repository.Name
+			ctx.APIErrorInternal(err)
 		}
-		repo, err := repo_model.GetRepositoryByOwnerAndName(ctx, owner, name)
-		if err != nil {
-			if repo_model.IsErrRepoNotExist(err) {
-				ctx.APIErrorNotFound()
-			} else {
-				ctx.APIErrorInternal(err)
-			}
-			return
-		}
-		headRepoID = repo.ID
-	} else {
-		headRepoID = ctx.Repo.Repository.ID
-		headBranch = head
+		return
 	}
 
 	pr, err := issues_model.GetPullRequestByBaseHeadInfo(ctx, ctx.Repo.Repository.ID, headRepoID, ctx.PathParam("base"), headBranch)
@@ -299,6 +300,16 @@ func GetPullRequestByBaseHead(ctx *context.APIContext) {
 	pull_service.StartPullRequestCheckOnView(ctx, pr)
 
 	ctx.JSON(http.StatusOK, convert.ToAPIPullRequest(ctx, pr, ctx.Doer))
+}
+
+// parsePullRequestHead resolves a head given as "branch", "owner:branch" or "owner/repo:branch" the way creating a pull request does
+func parsePullRequestHead(ctx *context.APIContext, head string) (headRepoID int64, headBranch string, _ error) {
+	compareReq := common.ParseCompareRouterParam(head)
+	_, headRepo, err := common.GetHeadOwnerAndRepo(ctx, ctx.Repo.Repository, compareReq)
+	if err != nil {
+		return 0, "", err
+	}
+	return headRepo.ID, compareReq.HeadOriRef, nil
 }
 
 // DownloadPullDiffOrPatch render a pull's raw diff or patch

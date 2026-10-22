@@ -144,6 +144,27 @@ func TestAPIViewPulls(t *testing.T) {
 			}))
 	}
 
+	t.Run("DefaultState", func(t *testing.T) {
+		writeToken := getTokenForLoggedInUser(t, ctx.Session, auth_model.AccessTokenScopeWriteRepository)
+		MakeRequest(t, NewRequestWithJSON(t, http.MethodPatch, fmt.Sprintf("/api/v1/repos/%s/%s/pulls/3", owner.Name, repo.Name), map[string]any{"state": "closed"}).AddTokenAuth(writeToken), http.StatusCreated)
+
+		for query, want := range map[string][]int64{
+			"":             {2, 5},
+			"state=open":   {2, 5},
+			"state=foo":    {2, 5},
+			"state=closed": {3},
+			"state=all":    {2, 3, 5},
+		} {
+			var listed []*api.PullRequest
+			DecodeJSON(t, ctx.Session.MakeRequest(t, NewRequestf(t, "GET", "/api/v1/repos/%s/%s/pulls?%s", owner.Name, repo.Name, query).AddTokenAuth(ctx.Token), http.StatusOK), &listed)
+			indexes := make([]int64, 0, len(listed))
+			for _, pull := range listed {
+				indexes = append(indexes, pull.Index)
+			}
+			assert.ElementsMatch(t, want, indexes, query)
+		}
+	})
+
 	t.Run("HeadRepoHiddenWhenInaccessible", func(t *testing.T) {
 		session := loginUser(t, "user31")
 		forkToken := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository)

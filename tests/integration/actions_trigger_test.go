@@ -973,6 +973,12 @@ jobs:
 		})
 		assert.NotNil(t, run)
 
+		statuses, err := git_model.GetLatestCommitStatus(t.Context(), repo.ID, branch.CommitID, db.ListOptionsAll)
+		require.NoError(t, err)
+		require.Len(t, statuses, 1)
+		assert.Equal(t, "dispatch.yml / test (workflow_dispatch)", statuses[0].Context)
+		assert.Equal(t, commitstatus.CommitStatusPending, statuses[0].State)
+
 		// Now trigger with rundetails
 		values.Set("return_run_details", "true")
 

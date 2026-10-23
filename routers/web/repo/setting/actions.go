@@ -141,6 +141,19 @@ func DeleteCollaborativeOwner(ctx *context.Context) {
 	ctx.JSONOK()
 }
 
+func DeleteCaches(ctx *context.Context) {
+	if err := actions.CreateCacheDeletion(ctx, ctx.Repo.Repository.ID, ctx.FormTrim("key"), ctx.FormTrim("ref")); err != nil {
+		if errors.Is(err, util.ErrInvalidArgument) {
+			ctx.JSONError(err.Error())
+		} else {
+			ctx.ServerError("CreateCacheDeletion", err)
+		}
+		return
+	}
+	ctx.Flash.Success(ctx.Tr("actions.general.caches_deleted"))
+	ctx.JSONRedirect(ctx.Repo.RepoLink + "/settings/actions/general")
+}
+
 // UpdateTokenPermissions updates the token permission settings for the repository
 func UpdateTokenPermissions(ctx *context.Context) {
 	redirectURL := ctx.Repo.RepoLink + "/settings/actions/general"

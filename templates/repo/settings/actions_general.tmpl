@@ -52,6 +52,29 @@
 			</div>
 		</form>
 	</div>
+
+	<h4 class="ui top attached header">
+		{{ctx.Locale.Tr "actions.general.caches"}}
+	</h4>
+	<div class="ui attached segment">
+		<form class="ui form form-fetch-action" action="{{.Link}}/caches/delete" method="post">
+			<p>{{ctx.Locale.Tr "actions.general.caches_desc"}}</p>
+			<div class="field">
+				<label for="cache-key">{{ctx.Locale.Tr "actions.general.caches_key"}}</label>
+				<input id="cache-key" name="key" maxlength="512">
+				<div class="help">{{ctx.Locale.Tr "actions.general.caches_key_help"}}</div>
+			</div>
+			<div class="field">
+				<label for="cache-ref">{{ctx.Locale.Tr "actions.general.caches_ref"}}</label>
+				<input id="cache-ref" name="ref" placeholder="refs/heads/main">
+				<div class="help">{{ctx.Locale.Tr "actions.general.caches_ref_help"}}</div>
+			</div>
+			<button type="submit" class="ui red button"
+				data-modal-confirm-header="{{ctx.Locale.Tr "actions.general.caches_delete"}}"
+				data-modal-confirm-content="{{ctx.Locale.Tr "actions.general.caches_delete_desc"}}"
+			>{{ctx.Locale.Tr "actions.general.caches_delete"}}</button>
+		</form>
+	</div>
 {{end}}
 
 {{if $isActionsEnabled}}

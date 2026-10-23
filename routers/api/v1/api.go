@@ -1364,6 +1364,7 @@ func Routes() *web.Router {
 						})
 					})
 					m.Get("/artifacts", repo.GetArtifacts)
+					m.Delete("/caches", reqToken(), reqRepoWriter(unit.TypeActions), repo.DeleteActionsCaches)
 					m.Group("/artifacts/{artifact_id}", func() {
 						m.Get("", repo.GetArtifact)
 						m.Delete("", reqRepoWriter(unit.TypeActions), repo.DeleteArtifact)

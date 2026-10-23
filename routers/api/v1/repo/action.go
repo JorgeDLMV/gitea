@@ -1959,6 +1959,59 @@ func GetArtifact(ctx *context.APIContext) {
 	ctx.APIError(http.StatusNotFound, "Artifact not found")
 }
 
+// DeleteActionsCaches deletes the caches matching a key
+func DeleteActionsCaches(ctx *context.APIContext) {
+	// swagger:operation DELETE /repos/{owner}/{repo}/actions/caches repository deleteActionsCaches
+	// ---
+	// summary: Deletes the Actions caches of a repository matching a key
+	// description: Runners stop restoring the matching caches at once and remove them from their stores
+	//   when they next run a job of the repository. Runners that predate this API ignore it.
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repository
+	//   type: string
+	//   required: true
+	// - name: key
+	//   in: query
+	//   description: the complete cache key
+	//   type: string
+	//   required: true
+	// - name: ref
+	//   in: query
+	//   description: only delete the caches of this ref, like `refs/heads/main` or `refs/pull/1/head`
+	//   type: string
+	// responses:
+	//   "204":
+	//     description: "No Content"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
+
+	key := ctx.FormTrim("key")
+	if key == "" {
+		ctx.APIError(http.StatusUnprocessableEntity, "key is required")
+		return
+	}
+	if err := actions_model.CreateCacheDeletion(ctx, ctx.Repo.Repository.ID, key, ctx.FormTrim("ref")); err != nil {
+		if errors.Is(err, util.ErrInvalidArgument) {
+			ctx.APIError(http.StatusUnprocessableEntity, err.Error())
+		} else {
+			ctx.APIErrorInternal(err)
+		}
+		return
+	}
+	ctx.Status(http.StatusNoContent)
+}
+
 // DeleteArtifact Deletes a specific artifact for a workflow run.
 func DeleteArtifact(ctx *context.APIContext) {
 	// swagger:operation DELETE /repos/{owner}/{repo}/actions/artifacts/{artifact_id} repository deleteArtifact

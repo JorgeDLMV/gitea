@@ -6004,6 +6004,59 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/actions/caches": {
+      "delete": {
+        "description": "Runners stop restoring the matching caches at once and remove them from their stores when they next run a job of the repository. Runners that predate this API ignore it.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Deletes the Actions caches of a repository matching a key",
+        "operationId": "deleteActionsCaches",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repository",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "the complete cache key",
+            "name": "key",
+            "in": "query",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "only delete the caches of this ref, like `refs/heads/main` or `refs/pull/1/head`",
+            "name": "ref",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/actions/jobs": {
       "get": {
         "produces": [

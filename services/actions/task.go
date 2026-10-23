@@ -210,6 +210,17 @@ func generateTaskContext(ctx context.Context, t *actions_model.ActionTask) (*str
 		gitCtx["actions_id_token_request_url"] = OIDCIssuer() + "/token?" // actions/core appends "&audience=..."
 		gitCtx["actions_id_token_request_token"] = requestToken
 	}
+	deletions, err := actions_model.FindCacheDeletions(ctx, t.RepoID)
+	if err != nil {
+		return nil, err
+	}
+	if len(deletions) > 0 {
+		cacheDeletions := make([]any, 0, len(deletions))
+		for _, deletion := range deletions {
+			cacheDeletions = append(cacheDeletions, map[string]any{"key": deletion.Key, "ref": deletion.Ref, "created": int64(deletion.CreatedUnix)})
+		}
+		gitCtx["gitea_cache_deletions"] = cacheDeletions
+	}
 
 	return structpb.NewStruct(gitCtx)
 }

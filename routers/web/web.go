@@ -1274,6 +1274,7 @@ func registerWebRoutes(m *web.Router, webAuth *AuthMiddleware) {
 					m.Post("/delete", repo_setting.DeleteCollaborativeOwner)
 				})
 				m.Post("/token_permissions", repo_setting.UpdateTokenPermissions)
+				m.Post("/caches/delete", repo_setting.DeleteCaches)
 			})
 		}, actions.MustEnableActions)
 		m.Get("/audit_logs", repo_setting.ViewAuditLogs)

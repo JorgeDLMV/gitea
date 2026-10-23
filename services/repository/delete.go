@@ -182,6 +182,7 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, ignoreOrgTeams 
 		&webhook.Webhook{RepoID: repoID},
 		&secret_model.Secret{RepoID: repoID},
 		&actions_model.ActionVariable{RepoID: repoID},
+		&actions_model.ActionCacheDeletion{RepoID: repoID},
 		&actions_model.ActionTaskStep{RepoID: repoID},
 		&actions_model.ActionTask{RepoID: repoID},
 		&actions_model.ActionRunJob{RepoID: repoID},

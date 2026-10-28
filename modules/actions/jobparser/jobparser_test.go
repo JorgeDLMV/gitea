@@ -165,9 +165,9 @@ jobs:
 		assert.Equal(t, []any{os, "build (" + os + ")", []string{os}}, runnerView(t, read.Jobs["build"]))
 		_, job, err := ParseRawSingleWorkflow([]byte(payload))
 		require.NoError(t, err)
-		group, _, err := EvaluateConcurrency(&model.RawConcurrency{Group: "${{ matrix.os }}"}, "build", job, map[string]any{}, nil, nil, nil)
+		concurrency, err := EvaluateConcurrency(&model.RawConcurrency{Group: "${{ matrix.os }}"}, "build", job, map[string]any{}, nil, nil, nil)
 		require.NoError(t, err)
-		assert.Equal(t, []any{"build (" + os + ")", []string{os}, os}, []any{job.DisplayName(), job.RunsOn(), group})
+		assert.Equal(t, []any{"build (" + os + ")", []string{os}, os}, []any{job.DisplayName(), job.RunsOn(), concurrency.Group})
 		_, err = Parse([]byte(payload))
 		require.NoError(t, err)
 	}
@@ -346,10 +346,10 @@ jobs:
 	}, nil, nil, 256)
 	require.NoError(t, err)
 	require.Len(t, expanded, 1)
-	group, _, err := EvaluateConcurrency(&model.RawConcurrency{Group: "${{ strategy.job-index }}:${{ strategy.job-total }}:${{ strategy.fail-fast }}"}, "target", expanded[0], map[string]any{}, nil, nil, nil)
+	concurrency, err := EvaluateConcurrency(&model.RawConcurrency{Group: "${{ strategy.job-index }}:${{ strategy.job-total }}:${{ strategy.fail-fast }}"}, "target", expanded[0], map[string]any{}, nil, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []any{"target-ubuntu-latest", []string{"ubuntu-latest"}, true, "3", "0:1:false"},
-		[]any{expanded[0].DisplayName(), expanded[0].RunsOn(), expanded[0].GetContinueOnError(), expanded[0].Strategy.MaxParallelString, group})
+		[]any{expanded[0].DisplayName(), expanded[0].RunsOn(), expanded[0].GetContinueOnError(), expanded[0].Strategy.MaxParallelString, concurrency.Group})
 }
 
 func TestExpandMatrixWithNeeds(t *testing.T) {

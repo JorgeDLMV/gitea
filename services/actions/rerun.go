@@ -17,6 +17,7 @@ import (
 	"gitea.dev/modules/container"
 	"gitea.dev/modules/log"
 	"gitea.dev/modules/setting"
+	"gitea.dev/modules/timeutil"
 	"gitea.dev/modules/util"
 
 	"go.yaml.in/yaml/v4"
@@ -230,7 +231,6 @@ func execRerunPlan(ctx context.Context, plan *rerunPlan) (*actions_model.ActionR
 		}
 		cancelledConcurrencyJobs = append(cancelledConcurrencyJobs, jobsToCancel...)
 		newAttempt.Status = newAttemptStatus
-		shouldBlock := newAttemptStatus == actions_model.StatusBlocked
 
 		if err := db.Insert(ctx, newAttempt); err != nil {
 			if _, getErr := actions_model.GetRunAttemptByRunIDAndAttemptNum(ctx, plan.run.ID, newAttempt.Attempt); getErr == nil {
@@ -286,7 +286,7 @@ func execRerunPlan(ctx context.Context, plan *rerunPlan) (*actions_model.ActionR
 			var invalidIf error
 			if plan.rerunAttemptJobIDs.Contains(templateJob.AttemptJobID) {
 				// the emitter decides `if:` once all needs have results, and is the only place expanding a deferred matrix
-				newJob.Status = util.Iif(shouldBlock, actions_model.StatusBlocked, actions_model.StatusWaiting)
+				newJob.Status = newAttemptStatus
 				if newJob.Status.IsWaiting() && len(newJob.Needs) > 0 {
 					newJob.Status = actions_model.StatusPending
 				}
@@ -296,6 +296,7 @@ func execRerunPlan(ctx context.Context, plan *rerunPlan) (*actions_model.ActionR
 				newJob.Stopped = 0
 				newJob.ConcurrencyGroup = ""
 				newJob.ConcurrencyCancel = false
+				newJob.ConcurrencyQueueMax = false
 				newJob.IsConcurrencyEvaluated = false
 
 				if templateJob.IsReusableCaller {
@@ -321,6 +322,9 @@ func execRerunPlan(ctx context.Context, plan *rerunPlan) (*actions_model.ActionR
 				}
 
 				applyMaxParallel(newJob, slots)
+				if newJob.Status == actions_model.StatusCancelled {
+					newJob.Stopped = timeutil.TimeStampNow()
+				}
 				newJobsToRerun = append(newJobsToRerun, newJob)
 			} else {
 				newJob.TaskID = 0
@@ -557,6 +561,7 @@ func cloneRunJobForAttempt(templateJob *actions_model.ActionRunJob, attempt *act
 		IsConcurrencyEvaluated: templateJob.IsConcurrencyEvaluated,
 		ConcurrencyGroup:       templateJob.ConcurrencyGroup,
 		ConcurrencyCancel:      templateJob.ConcurrencyCancel,
+		ConcurrencyQueueMax:    templateJob.ConcurrencyQueueMax,
 		TokenPermissions:       templateJob.TokenPermissions,
 		MaxParallel:            templateJob.MaxParallel,
 

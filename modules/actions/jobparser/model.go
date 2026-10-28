@@ -312,26 +312,45 @@ func newJobEvaluator(jobID string, job *Job, gitCtx map[string]any, results map[
 	return expreval.New(NewInterpeter(jobID, strategy, matrix, model.GithubContextFromMap(gitCtx), results, vars, inputs).Evaluate), nil
 }
 
-func EvaluateConcurrency(rc *model.RawConcurrency, jobID string, job *Job, gitCtx map[string]any, results map[string]*JobResult, vars map[string]string, inputs map[string]any) (string, bool, error) {
+// EvaluatedConcurrency is a workflow or job concurrency with its expressions evaluated
+type EvaluatedConcurrency struct {
+	Group            string
+	CancelInProgress bool
+	QueueMax         bool // pending runs and jobs wait in the group instead of replacing each other
+}
+
+func EvaluateConcurrency(rc *model.RawConcurrency, jobID string, job *Job, gitCtx map[string]any, results map[string]*JobResult, vars map[string]string, inputs map[string]any) (EvaluatedConcurrency, error) {
 	evaluator, err := newJobEvaluator(jobID, job, gitCtx, results, vars, inputs)
 	if err != nil {
-		return "", false, err
+		return EvaluatedConcurrency{}, err
 	}
 	var node yaml.Node
 	if err := node.Encode(rc); err != nil {
-		return "", false, fmt.Errorf("failed to encode concurrency: %w", err)
+		return EvaluatedConcurrency{}, fmt.Errorf("failed to encode concurrency: %w", err)
 	}
 	if err := evaluator.EvaluateYamlNode(&node); err != nil {
-		return "", false, fmt.Errorf("failed to evaluate concurrency: %w", err)
+		return EvaluatedConcurrency{}, fmt.Errorf("failed to evaluate concurrency: %w", err)
 	}
 	var evaluated model.RawConcurrency
 	if err := node.Decode(&evaluated); err != nil {
-		return "", false, fmt.Errorf("failed to unmarshal evaluated concurrency: %w", err)
+		return EvaluatedConcurrency{}, fmt.Errorf("failed to unmarshal evaluated concurrency: %w", err)
 	}
 	if evaluated.RawExpression != "" {
-		return evaluated.RawExpression, false, nil
+		return EvaluatedConcurrency{Group: evaluated.RawExpression}, nil
 	}
-	return evaluated.Group, util.ParseYamlBool(evaluated.CancelInProgress), nil
+
+	concurrency := EvaluatedConcurrency{Group: evaluated.Group, CancelInProgress: util.ParseYamlBool(evaluated.CancelInProgress)}
+	switch evaluated.Queue {
+	case "", "single":
+	case "max":
+		if concurrency.CancelInProgress {
+			return EvaluatedConcurrency{}, util.NewInvalidArgumentErrorf("concurrency `queue: max` cannot be combined with `cancel-in-progress: true`")
+		}
+		concurrency.QueueMax = true
+	default:
+		return EvaluatedConcurrency{}, util.NewInvalidArgumentErrorf("invalid concurrency queue %q, it must be \"single\" or \"max\"", evaluated.Queue)
+	}
+	return concurrency, nil
 }
 
 // workflowCallEvent is only fired by another workflow's `uses:`, so it is excluded from trigger detection.

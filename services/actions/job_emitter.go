@@ -156,7 +156,7 @@ func findConcurrencyWaiterToWake(ctx context.Context, repoID, excludeRunID int64
 		return 0, nil
 	}
 
-	cAttempts, cJobs, err := actions_model.GetConcurrencyWaiters(ctx, repoID, concurrencyGroup)
+	cAttempts, cJobs, err := actions_model.GetConcurrencyQueue(ctx, repoID, concurrencyGroup)
 	if err != nil {
 		return 0, fmt.Errorf("find blocked concurrent runs: %w", err)
 	}
@@ -193,15 +193,6 @@ func checkRunConcurrency(ctx context.Context, run *actions_model.ActionRun) (*jo
 			return err
 		}
 		if concurrentRunID == 0 {
-			return nil
-		}
-
-		concurrentRun, err := actions_model.GetRunByRepoAndID(ctx, run.RepoID, concurrentRunID)
-		if err != nil {
-			return fmt.Errorf("get concurrent run %d: %w", concurrentRunID, err)
-		}
-		// A run awaiting approval is not advanced by concurrency; ApproveRuns emits it once approved.
-		if concurrentRun.NeedApproval {
 			return nil
 		}
 
@@ -335,9 +326,8 @@ func checkJobsOfCurrentRunAttempt(ctx context.Context, run *actions_model.Action
 					} else {
 						expandedAnyCaller = true
 					}
-				case actions_model.StatusSkipped, actions_model.StatusFailure:
-					job.Status = status
-					if n, err := actions_model.UpdateRunJob(ctx, job, builder.Eq{"status": actions_model.StatusBlocked}, "status"); err != nil {
+				case actions_model.StatusSkipped, actions_model.StatusFailure, actions_model.StatusCancelled:
+					if n, err := actions_model.UpdateRunJob(ctx, job, builder.Eq{"status": actions_model.StatusBlocked}, setResolvedStatus(job, status)...); err != nil {
 						return err
 					} else if n == 1 {
 						result.UpdatedJobs = append(result.UpdatedJobs, job)
@@ -347,8 +337,7 @@ func checkJobsOfCurrentRunAttempt(ctx context.Context, run *actions_model.Action
 			}
 
 			// Non-caller: standard status update.
-			job.Status = status
-			if n, err := actions_model.UpdateRunJob(ctx, job, builder.Eq{"status": actions_model.StatusBlocked}, "status"); err != nil {
+			if n, err := actions_model.UpdateRunJob(ctx, job, builder.Eq{"status": actions_model.StatusBlocked}, setResolvedStatus(job, status)...); err != nil {
 				return err
 			} else if n != 1 {
 				return fmt.Errorf("no affected for updating blocked job %v", job.ID)
@@ -376,6 +365,17 @@ func checkJobsOfCurrentRunAttempt(ctx context.Context, run *actions_model.Action
 	}
 	result.CancelledJobs = append(result.CancelledJobs, resolver.cancelledJobs...)
 	return result, nil
+}
+
+// setResolvedStatus sets the status the resolver decided and returns the columns to update,
+// a job cancelled by its full concurrency queue also gets stopped.
+func setResolvedStatus(job *actions_model.ActionRunJob, status actions_model.Status) []string {
+	job.Status = status
+	if status == actions_model.StatusCancelled {
+		job.Stopped = timeutil.TimeStampNow()
+		return []string{"status", "stopped"}
+	}
+	return []string{"status"}
 }
 
 // reloadCallersFinishedByChildren reloads the callers the children's cascade finished in this pass,
@@ -667,6 +667,8 @@ func (r *jobStatusResolver) resolve(ctx context.Context) (map[int64]actions_mode
 
 		if newStatus != actions_model.StatusBlocked {
 			ret[id] = newStatus
+		}
+		if newStatus == actions_model.StatusWaiting {
 			r.admittedGroups = append(r.admittedGroups, actionRunJob.ConcurrencyGroup)
 		}
 	}
@@ -691,7 +693,7 @@ func updateConcurrencyEvaluationForJobWithNeeds(ctx context.Context, actionRunJo
 		return err
 	}
 
-	if _, err := actions_model.UpdateRunJob(ctx, actionRunJob, nil, "concurrency_group", "concurrency_cancel", "is_concurrency_evaluated"); err != nil {
+	if _, err := actions_model.UpdateRunJob(ctx, actionRunJob, nil, "concurrency_group", "concurrency_cancel", "concurrency_queue_max", "is_concurrency_evaluated"); err != nil {
 		return fmt.Errorf("update run job: %w", err)
 	}
 	return nil

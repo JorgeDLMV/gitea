@@ -11,7 +11,9 @@ import (
 	repo_model "gitea.dev/models/repo"
 	"gitea.dev/models/unittest"
 	user_model "gitea.dev/models/user"
+	"gitea.dev/modules/setting"
 	"gitea.dev/modules/test"
+	"gitea.dev/modules/util"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -160,6 +162,69 @@ jobs:
 		jobs := runJobs(t, run.ID, run.LatestAttemptID)
 		require.Len(t, jobs, 1)
 		assert.Equal(t, actions_model.StatusWaiting, jobs[0].Status)
+	})
+
+	t.Run("approval cancels a run or job finding its concurrency queue full", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.Actions.ConcurrencyQueueLimit, 1)()
+		repo4 := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 4})
+		for _, tc := range []struct {
+			name, group string
+			index       int64
+			content     string
+		}{
+			{name: "workflow level", group: "queued-run", index: 9010, content: `on: pull_request
+concurrency:
+  group: queued-run
+  queue: max
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+`},
+			{name: "job level", group: "queued-job", index: 9020, content: `on: pull_request
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: queued-job
+      queue: max
+    steps:
+      - run: echo hi
+`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				// a holder and a waiter fill the queue of one
+				workflowLevel := tc.name == "workflow level"
+				var groupJobs []*actions_model.ActionRunJob
+				for i, status := range []actions_model.Status{actions_model.StatusWaiting, actions_model.StatusBlocked} {
+					groupRun := &actions_model.ActionRun{RepoID: 4, OwnerID: 1, Index: tc.index + int64(i), TriggerUserID: 1, TriggerEvent: "push", EventPayload: "{}", Status: status}
+					require.NoError(t, db.Insert(t.Context(), groupRun))
+					groupAttempt := &actions_model.ActionRunAttempt{RepoID: 4, RunID: groupRun.ID, Attempt: 1, Status: status, ConcurrencyGroup: util.Iif(workflowLevel, tc.group, ""), ConcurrencyQueueMax: workflowLevel}
+					require.NoError(t, db.Insert(t.Context(), groupAttempt))
+					groupJob := &actions_model.ActionRunJob{RunID: groupRun.ID, RunAttemptID: groupAttempt.ID, RepoID: 4, OwnerID: 1, JobID: "deploy", AttemptJobID: 1, Status: status, ConcurrencyGroup: util.Iif(workflowLevel, "", tc.group), ConcurrencyQueueMax: !workflowLevel}
+					require.NoError(t, db.Insert(t.Context(), groupJob))
+					groupJobs = append(groupJobs, groupJob)
+				}
+
+				run := &actions_model.ActionRun{
+					RepoID: 4, OwnerID: 1, WorkflowID: "test.yaml", TriggerUserID: 2,
+					Ref: "refs/pull/1/head", CommitSHA: "c2d72f548424103f01ee1dc02889c1e2bff816b0",
+					Event: "pull_request", TriggerEvent: "pull_request", EventPayload: "{}", NeedApproval: true,
+					WorkflowRepoID: 4, WorkflowCommitSHA: "c2d72f548424103f01ee1dc02889c1e2bff816b0",
+				}
+				require.NoError(t, PrepareRunAndInsert(t.Context(), []byte(tc.content), run, nil))
+				_, err := ApproveRuns(t.Context(), repo4, doer, []int64{run.ID})
+				require.NoError(t, err)
+
+				jobs := runJobs(t, run.ID, run.LatestAttemptID)
+				require.Len(t, jobs, 1)
+				assert.Equal(t, actions_model.StatusCancelled, jobs[0].Status)
+				assert.NotZero(t, jobs[0].Stopped)
+				assert.Equal(t, actions_model.StatusWaiting, unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRunJob{ID: groupJobs[0].ID}).Status)
+				assert.Equal(t, actions_model.StatusBlocked, unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRunJob{ID: groupJobs[1].ID}).Status)
+			})
+		}
 	})
 
 	t.Run("re-approving an approved run is a no-op", func(t *testing.T) {

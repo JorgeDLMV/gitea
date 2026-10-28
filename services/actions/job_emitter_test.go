@@ -784,6 +784,16 @@ func Test_findConcurrencyWaiterToWake(t *testing.T) {
 	id, err = findConcurrencyWaiterToWake(ctx, repoID, 0, "own-run-cg")
 	assert.NoError(t, err)
 	assert.Equal(t, ownRun.ID, id)
+
+	// Free group "queue-cg": a run awaiting approval is skipped, then the oldest waiter is woken.
+	awaitingApproval := seed(99708, "queue-cg", actions_model.StatusBlocked)
+	awaitingApproval.NeedApproval = true
+	assert.NoError(t, actions_model.UpdateRun(ctx, awaitingApproval, "need_approval"))
+	oldest := seed(99709, "queue-cg", actions_model.StatusBlocked)
+	seed(99710, "queue-cg", actions_model.StatusBlocked)
+	id, err = findConcurrencyWaiterToWake(ctx, repoID, 0, "queue-cg")
+	assert.NoError(t, err)
+	assert.Equal(t, oldest.ID, id)
 }
 
 func Test_maxParallelReusableCallerLifecycle(t *testing.T) {

@@ -60,11 +60,12 @@ type ActionRunJob struct {
 
 	// IsConcurrencyEvaluated is only valid/needed when this job's RawConcurrency is not empty.
 	// If RawConcurrency can't be evaluated (e.g. depend on other job's outputs or have errors), this field will be false.
-	// If RawConcurrency has been successfully evaluated, this field will be true, ConcurrencyGroup and ConcurrencyCancel are also set.
+	// If RawConcurrency has been successfully evaluated, this field will be true, ConcurrencyGroup, ConcurrencyCancel and ConcurrencyQueueMax are also set.
 	IsConcurrencyEvaluated bool
 
-	ConcurrencyGroup  string `xorm:"index(repo_concurrency) NOT NULL DEFAULT ''"` // evaluated concurrency.group
-	ConcurrencyCancel bool   `xorm:"NOT NULL DEFAULT FALSE"`                      // evaluated concurrency.cancel-in-progress
+	ConcurrencyGroup    string `xorm:"index(repo_concurrency) NOT NULL DEFAULT ''"` // evaluated concurrency.group
+	ConcurrencyCancel   bool   `xorm:"NOT NULL DEFAULT FALSE"`                      // evaluated concurrency.cancel-in-progress
+	ConcurrencyQueueMax bool   `xorm:"NOT NULL DEFAULT FALSE"`                      // evaluated concurrency.queue is "max"
 
 	// TokenPermissions stores the explicit permissions from workflow/job YAML (no org/repo clamps applied).
 	// Org/repo clamps are enforced when the token is used at runtime.
@@ -743,7 +744,7 @@ func CancelPreviousJobsByJobConcurrency(ctx context.Context, job *ActionRunJob) 
 		return nil, nil
 	}
 
-	attempts, jobs, err := getConcurrencyEntriesToReplace(ctx, job.RepoID, job.ConcurrencyGroup, job.ConcurrencyCancel)
+	attempts, jobs, err := getConcurrencyEntriesToReplace(ctx, job.RepoID, job.ConcurrencyGroup, job.ConcurrencyCancel, job.ConcurrencyQueueMax)
 	if err != nil {
 		return nil, fmt.Errorf("find concurrent runs and jobs: %w", err)
 	}

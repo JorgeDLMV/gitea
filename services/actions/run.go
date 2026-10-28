@@ -205,6 +205,9 @@ func insertRunJob(ctx context.Context, run *actions_model.ActionRun, runAttempt 
 
 	isReusableWorkflowCaller := job.Uses != ""
 	status := util.Iif(runAttempt.Status == actions_model.StatusBlocked || run.NeedApproval, actions_model.StatusBlocked, actions_model.StatusWaiting)
+	if runAttempt.Status == actions_model.StatusCancelled { // the run found its concurrency queue full
+		status = actions_model.StatusCancelled
+	}
 	if status.IsWaiting() && len(needs) > 0 {
 		status = actions_model.StatusPending
 	}
@@ -289,6 +292,9 @@ func insertRunJob(ctx context.Context, run *actions_model.ActionRun, runAttempt 
 	}
 
 	applyMaxParallel(runJob, slots)
+	if runJob.Status == actions_model.StatusCancelled {
+		runJob.Stopped = timeutil.TimeStampNow()
+	}
 
 	if err := db.Insert(ctx, runJob); err != nil {
 		return nil, nil, false, err
@@ -305,8 +311,8 @@ func insertRunJob(ctx context.Context, run *actions_model.ActionRun, runAttempt 
 		}
 	}
 
-	// the emitter resolves an expanded caller's children and a skipped or failed job's dependents
-	return runJob, cancelledConcurrencyJobs, runJob.IsExpanded || runJob.Status.In(actions_model.StatusSkipped, actions_model.StatusFailure), nil
+	// the emitter resolves an expanded caller's children and the dependents of a job that is already done
+	return runJob, cancelledConcurrencyJobs, runJob.IsExpanded || runJob.Status.In(actions_model.StatusSkipped, actions_model.StatusFailure, actions_model.StatusCancelled), nil
 }
 
 func expandInlineReusableCaller(ctx context.Context, run *actions_model.ActionRun, runAttempt *actions_model.ActionRunAttempt, caller *actions_model.ActionRunJob, vars map[string]string) error {

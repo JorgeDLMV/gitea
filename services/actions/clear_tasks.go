@@ -102,7 +102,8 @@ func shouldBlockJobByConcurrency(ctx context.Context, job *actions_model.ActionR
 }
 
 // PrepareToStartJobWithConcurrency prepares a job to start by its evaluated concurrency group and cancelling previous jobs if necessary.
-// It returns the new status of the job (either StatusBlocked or StatusWaiting), any cancelled jobs, and any error encountered during the process.
+// It returns the new status of the job (StatusBlocked, StatusWaiting, or StatusCancelled when the queue of its `queue: max` group is full),
+// any cancelled jobs, and any error encountered during the process.
 func PrepareToStartJobWithConcurrency(ctx context.Context, job *actions_model.ActionRunJob) (actions_model.Status, []*actions_model.ActionRunJob, error) {
 	// cancel before checking, so the jobs this cancellation finishes no longer hold the group
 	jobs, err := actions_model.CancelPreviousJobsByJobConcurrency(ctx, job)
@@ -114,8 +115,27 @@ func PrepareToStartJobWithConcurrency(ctx context.Context, job *actions_model.Ac
 	if err != nil {
 		return actions_model.StatusBlocked, nil, err
 	}
+	status, err := concurrencyGateStatus(ctx, shouldBlock, job.ConcurrencyQueueMax, job.RepoID, job.ConcurrencyGroup,
+		func(a *actions_model.ActionRunAttempt) bool { return a.ID == job.RunAttemptID },
+		func(j *actions_model.ActionRunJob) bool { return j.ID == job.ID })
+	if err != nil {
+		return actions_model.StatusBlocked, nil, err
+	}
+	return status, jobs, nil
+}
 
-	return util.Iif(shouldBlock, actions_model.StatusBlocked, actions_model.StatusWaiting), jobs, nil
+// concurrencyGateStatus returns StatusCancelled instead of StatusBlocked when the entry is new to a full `queue: max` queue:
+// the entry's own attempt and jobs are not counted, so a waiter checked again is not cancelled while the queue is within the limit.
+func concurrencyGateStatus(ctx context.Context, shouldBlock, queueMax bool, repoID int64, concurrencyGroup string, isOwnAttempt func(*actions_model.ActionRunAttempt) bool, isOwnJob func(*actions_model.ActionRunJob) bool) (actions_model.Status, error) {
+	if !shouldBlock || !queueMax {
+		return util.Iif(shouldBlock, actions_model.StatusBlocked, actions_model.StatusWaiting), nil
+	}
+	attempts, jobs, err := actions_model.GetConcurrencyQueue(ctx, repoID, concurrencyGroup)
+	if err != nil {
+		return actions_model.StatusBlocked, fmt.Errorf("get concurrency queue: %w", err)
+	}
+	waiters := len(slices.DeleteFunc(attempts, isOwnAttempt)) + len(slices.DeleteFunc(jobs, isOwnJob))
+	return util.Iif(waiters >= max(1, setting.Actions.ConcurrencyQueueLimit), actions_model.StatusCancelled, actions_model.StatusBlocked), nil
 }
 
 func shouldBlockRunByConcurrency(ctx context.Context, attempt *actions_model.ActionRunAttempt) (bool, error) {
@@ -133,7 +153,8 @@ func shouldBlockRunByConcurrency(ctx context.Context, attempt *actions_model.Act
 }
 
 // PrepareToStartRunWithConcurrency prepares a run attempt to start by its evaluated concurrency group and cancelling previous jobs if necessary.
-// It returns the new status of the run attempt (either StatusBlocked or StatusWaiting), any cancelled jobs, and any error encountered during the process.
+// It returns the new status of the run attempt (StatusBlocked, StatusWaiting, or StatusCancelled when the queue of its `queue: max` group is full),
+// any cancelled jobs, and any error encountered during the process.
 func PrepareToStartRunWithConcurrency(ctx context.Context, attempt *actions_model.ActionRunAttempt) (actions_model.Status, []*actions_model.ActionRunJob, error) {
 	jobs, err := actions_model.CancelPreviousJobsByRunConcurrency(ctx, attempt)
 	if err != nil {
@@ -144,8 +165,13 @@ func PrepareToStartRunWithConcurrency(ctx context.Context, attempt *actions_mode
 	if err != nil {
 		return actions_model.StatusBlocked, nil, err
 	}
-
-	return util.Iif(shouldBlock, actions_model.StatusBlocked, actions_model.StatusWaiting), jobs, nil
+	status, err := concurrencyGateStatus(ctx, shouldBlock, attempt.ConcurrencyQueueMax, attempt.RepoID, attempt.ConcurrencyGroup,
+		func(a *actions_model.ActionRunAttempt) bool { return a.RunID == attempt.RunID },
+		func(j *actions_model.ActionRunJob) bool { return j.RunID == attempt.RunID })
+	if err != nil {
+		return actions_model.StatusBlocked, nil, err
+	}
+	return status, jobs, nil
 }
 
 func stopTasks(ctx context.Context, opts actions_model.FindTaskOptions) error {
